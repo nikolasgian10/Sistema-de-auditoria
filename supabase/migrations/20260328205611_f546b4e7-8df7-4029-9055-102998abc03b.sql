@@ -1,0 +1,1 @@
+DROP POLICY "Gestors can manage machines" ON public.machines;

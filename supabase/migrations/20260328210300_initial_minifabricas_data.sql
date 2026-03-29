@@ -1,0 +1,35 @@
+-- ============================================================================
+-- DADOS INICIAIS - ESTRUTURA VAZIA
+-- ============================================================================
+-- Este arquivo cria apenas a ESTRUTURA pronta para dados
+-- As minifábricas, máquinas e checklists devem ser gerenciadas pelo GESTOR
+-- via interface da aplicação
+--
+-- As minifábricas reais são:
+-- MFASC - Anéis sem cobertura
+-- MFAN - Aço nitretado
+-- MFPA - Produtos de aço
+-- MFBA - Buchas e arruelas
+-- MFBR - Bronzinas
+-- MFBL - Blanks
+-- FERR - Ferramentaria
+-- MFACC - Anéis com cobertura
+-- LOG - Logística
+-- RH - RH
+-- QC - Qualidade
+--
+-- O gestor pode criar/editar minifábricas, máquinas e checklists via app
+-- ============================================================================
+
+-- Verificar se as tabelas estão vazias (opcional)
+-- DELETE FROM public.checklist_items;
+-- DELETE FROM public.checklists;
+-- DELETE FROM public.machines;
+
+-- O sistema está pronto com as seguintes tabelas criadas:
+-- - public.machines (vazia, aguardando dados do gestor)
+-- - public.checklists (vazia, aguardando dados do gestor)
+-- - public.checklist_items (vazia, aguardando dados do gestor)
+-- - public.audits (vazia, pronta para auditorias)
+-- - public.audit_answers (vazia, pronta para respostas)
+-- - public.schedule_entries (vazia, pronta para cronograma)
