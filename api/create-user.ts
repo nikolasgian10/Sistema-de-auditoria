@@ -1,9 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Debug
+  if (!SUPABASE_URL) {
+    console.error('Missing SUPABASE_URL environment variable');
+    return res.status(500).json({ error: 'Variável SUPABASE_URL não configurada' });
+  }
+  if (!SERVICE_ROLE_KEY) {
+    console.error('Missing SERVICE_ROLE_KEY environment variable');
+    return res.status(500).json({ error: 'Variável SUPABASE_SERVICE_ROLE_KEY não configurada' });
+  }
+
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
