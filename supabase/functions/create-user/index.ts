@@ -19,22 +19,28 @@ Deno.serve(async (req) => {
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const SERVICE_KEY = Deno.env.get("UPABASE_SERVICE_ROLE_KEY") || "";
+    const SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhb3d3Y2xhZmV6bnJtb2V2a2ptIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc1MTQxNiwiZXhwIjoyMDkwMzI3NDE2fQ.uChPOB1xeGZdujzjo77qeGX7bMiaK3vhjClGF0NUxgM";
+    console.log("URL:", SUPABASE_URL);
+    console.log("KEY:", SERVICE_KEY);
 
-    const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${SERVICE_KEY}`,
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { name },
-      }),
-    });
-
+    const createUserRes = await fetch(
+  "https://daowwclafeznrmoevkjm.supabase.co/auth/v1/admin/users",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhb3d3Y2xhZmV6bnJtb2V2a2ptIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc1MTQxNiwiZXhwIjoyMDkwMzI3NDE2fQ.uChPOB1xeGZdujzjo77qeGX7bMiaK3vhjClGF0NUxgM",
+      "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhb3d3Y2xhZmV6bnJtb2V2a2ptIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc1MTQxNi," +
+        "InZXhwIjoyMDkwMzI3NDE2fQ.uChPOB1xeGZdujzjo77qeGX7bMiaK3vhjClGF0NUxgM",
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name },
+    }),
+  }
+);
     if (!createUserRes.ok) {
       const error = await createUserRes.json();
       return new Response(

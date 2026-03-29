@@ -4,21 +4,19 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Debug
   if (!SUPABASE_URL) {
-    console.error('Missing SUPABASE_URL environment variable');
-    return res.status(500).json({ error: 'Variável SUPABASE_URL não configurada' });
+    return res.status(500).json({ error: 'SUPABASE_URL não configurada' });
   }
+
   if (!SERVICE_ROLE_KEY) {
-    console.error('Missing SERVICE_ROLE_KEY environment variable');
-    return res.status(500).json({ error: 'Variável SUPABASE_SERVICE_ROLE_KEY não configurada' });
+    return res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY não configurada' });
   }
 
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    return res.status(200).json({});
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
@@ -32,12 +30,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Email, senha, nome e role obrigatórios' });
     }
 
-    // Create user in Supabase Auth
+    // 🔥 CREATE USER
     const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+        'apikey': SERVICE_ROLE_KEY,
       },
       body: JSON.stringify({
         email,
@@ -47,37 +46,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
     });
 
+    const userData = await createUserRes.json();
+
     if (!createUserRes.ok) {
-      const error = await createUserRes.json();
-      return res.status(400).json({ error: error.message || 'Erro ao criar usuário' });
+      return res.status(400).json({ error: userData.error || 'Erro ao criar usuário' });
     }
 
-    const userData = await createUserRes.json();
     const userId = userData.id;
 
-    // Update profile with name and minifabrica
+    // 🔥 UPDATE PROFILE
     await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+        'apikey': SERVICE_ROLE_KEY,
       },
-      body: JSON.stringify({ name, minifabrica: minifabrica || null }),
+      body: JSON.stringify({
+        name,
+        minifabrica: minifabrica || null,
+      }),
     });
 
-    // Insert user role
+    // 🔥 INSERT ROLE
     await fetch(`${SUPABASE_URL}/rest/v1/user_roles`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
+        'apikey': SERVICE_ROLE_KEY,
       },
-      body: JSON.stringify({ user_id: userId, role }),
+      body: JSON.stringify({
+        user_id: userId,
+        role,
+      }),
     });
 
-    return res.status(200).json({ success: true, id: userId, email, name });
+    return res.status(200).json({
+      success: true,
+      id: userId,
+      email,
+      name,
+    });
+
   } catch (err: any) {
-    console.error('Error:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao criar usuário' });
+    return res.status(500).json({
+      error: err.message || 'Erro interno',
+    });
   }
 }
