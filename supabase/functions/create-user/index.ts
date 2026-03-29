@@ -18,8 +18,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const SUPABASE_URL = Deno.env.get("https://daowwclafeznrmoevkjm.supabase.co") || "";
+    const SERVICE_KEY = Deno.env.get("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhb3d3Y2xhZmV6bnJtb2V2a2ptIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc1MTQxNiwiZXhwIjoyMDkwMzI3NDE2fQ.uChPOB1xeGZdujzjo77qeGX7bMiaK3vhjClGF0NUxgM") || "";
 
     // Create user via REST API
     const createUserRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
