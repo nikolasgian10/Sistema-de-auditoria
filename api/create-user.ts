@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Debug
@@ -12,6 +13,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!SERVICE_ROLE_KEY) {
     console.error('Missing SERVICE_ROLE_KEY environment variable');
     return res.status(500).json({ error: 'Variável SUPABASE_SERVICE_ROLE_KEY não configurada' });
+  }
+  if (!PUBLISHABLE_KEY) {
+    console.error('Missing PUBLISHABLE_KEY environment variable');
+    return res.status(500).json({ error: 'Variável SUPABASE_PUBLISHABLE_KEY não configurada' });
   }
 
   if (req.method === 'OPTIONS') {
@@ -61,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
-        'apikey': SERVICE_ROLE_KEY,
+        'apikey': PUBLISHABLE_KEY,
       },
       body: JSON.stringify({ name, minifabrica: minifabrica || null }),
     });
@@ -72,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
-        'apikey': SERVICE_ROLE_KEY,
+        'apikey': PUBLISHABLE_KEY,
       },
       body: JSON.stringify({ user_id: userId, role }),
     });
