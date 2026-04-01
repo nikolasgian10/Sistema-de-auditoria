@@ -6,10 +6,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { QrCode, Camera, CheckCircle2, XCircle, Send, ArrowLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Stage = 'scan' | 'checklist' | 'done';
+type Stage = 'scan' | 'selectChecklist' | 'checklist' | 'done';
 
 interface LPAAnswer extends AuditAnswer {
   actionImmediate: boolean;
@@ -71,7 +73,10 @@ export default function MobileAudit() {
       const ck = allChecklists.find(c => c.id === entry.checklistId);
       if (ck) { setChecklist(ck); setAnswers(ck.items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok', actionImmediate: false, escalate: false, responsible: '' }))); setStage('checklist'); return; }
     }
-    if (allChecklists.length > 0) { setChecklist(allChecklists[0]); setAnswers(allChecklists[0].items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok', actionImmediate: false, escalate: false, responsible: '' }))); setStage('checklist'); }
+    // Se não tem auditoria agendada e tem checklists, mostra seletor
+    if (allChecklists.length > 0) { 
+      setStage('selectChecklist');
+    }
     else toast.error('Nenhum checklist disponível');
   };
 
@@ -101,6 +106,38 @@ export default function MobileAudit() {
     if (conformity === 'na') return { bg: '#a3a3a3', text: 'white', label: 'NA' };
     return { bg: '#e5e5e5', text: '#888', label: '–' };
   };
+
+  if (stage === 'selectChecklist' && machine) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6">
+          <div>
+            <Button variant="ghost" size="sm" onClick={reset} className="mb-4"><ArrowLeft className="mr-2 h-4 w-4" />Voltar</Button>
+            <h2 className="text-2xl font-bold mb-2">Selecione o Checklist</h2>
+            <p className="text-muted-foreground mb-4">Máquina: <strong>{machine.name}</strong> ({machine.code})</p>
+          </div>
+          <div className="space-y-3">
+            <Label>Checklist</Label>
+            <Select onValueChange={(checklistId) => {
+              const ck = allChecklists.find(c => c.id === checklistId);
+              if (ck) {
+                setChecklist(ck);
+                setAnswers(ck.items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok', actionImmediate: false, escalate: false, responsible: '' })));
+                setStage('checklist');
+              }
+            }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Escolha um checklist" />
+              </SelectTrigger>
+              <SelectContent>
+                {allChecklists.map(ck => <SelectItem key={ck.id} value={ck.id}>{ck.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (stage === 'done') {
     return (

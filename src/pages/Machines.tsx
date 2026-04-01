@@ -44,7 +44,8 @@ function exportToPDF(machines: Machine[]) {
 }
 
 export default function Machines() {
-  const { allUsers } = useAuth();
+  const { allUsers, getEffectiveMinifabrica } = useAuth();
+  const effectiveMinifabrica = getEffectiveMinifabrica();
   const { data: machines = [], isLoading } = useMachines();
   const { data: checklists = [] } = useChecklists();
   const addMachine = useAddMachine();
@@ -63,15 +64,20 @@ export default function Machines() {
   const audits = store.getAudits();
 
   const filteredMachines = useMemo(() => {
-    if (!searchTerm) return machines;
-    const term = searchTerm.toLowerCase();
-    return machines.filter(m =>
-      m.name.toLowerCase().includes(term) ||
-      m.code.toLowerCase().includes(term) ||
-      m.sector.toLowerCase().includes(term) ||
-      m.description.toLowerCase().includes(term)
-    );
-  }, [machines, searchTerm]);
+    let result = effectiveMinifabrica ? machines.filter(m => m.minifabrica === effectiveMinifabrica) : machines;
+    
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(m =>
+        m.name.toLowerCase().includes(term) ||
+        m.code.toLowerCase().includes(term) ||
+        m.sector.toLowerCase().includes(term) ||
+        m.description.toLowerCase().includes(term)
+      );
+    }
+    
+    return result;
+  }, [machines, searchTerm, effectiveMinifabrica]);
 
   const machineHistory = useMemo(() => {
     if (!historyMachine) return [];

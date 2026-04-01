@@ -172,88 +172,60 @@ export const store = {
   getSchedule: (): ScheduleEntry[] => load('lpa_schedule', []),
   saveSchedule: (data: ScheduleEntry[]) => save('lpa_schedule', data),
 
-  generateSchedule: (month: number, year: number, minifabricaId?: string, sector?: string): ScheduleEntry[] => {
-    const checklists = store.getChecklists();
-    const allMachines = store.getMachines();
-
-    if (checklists.length === 0) return [];
-
-    const sectorKey = sector || '_all';
-    const weekTemplates = store.getWeekTemplates(sectorKey);
-    const scheduleLocations = store.getScheduleLocations(sectorKey);
-
-    let filteredMachines = allMachines;
-    if (minifabricaId) filteredMachines = filteredMachines.filter(m => m.minifabrica === minifabricaId);
-    if (sector) filteredMachines = filteredMachines.filter(m => m.sector === sector);
-
-    const locationIds = scheduleLocations.length > 0
-      ? scheduleLocations
-      : filteredMachines.map(m => m.id);
-
-    if (locationIds.length === 0) return [];
+  generateSchedule: (month: number, year: number, minifabricaId?: string, sector?: string, machinesData?: any[], checklistsData?: any[]): ScheduleEntry[] => {
+    // Use provided data (from Supabase) or fallback to localStorage
+    const machines = machinesData || store.getMachines();
+    const checklists = checklistsData || store.getChecklists();
+    console.log('generateSchedule input:', { month, year, minifabricaId, sector, machinesCount: machines.length, checklistsCount: checklists.length });
+    
+    if (checklists.length === 0 || machines.length === 0) {
+      console.log('Sem checklists ou máquinas');
+      return [];
+    }
 
     const entries: ScheduleEntry[] = [];
     const weeks = getWeeksOfMonthISO(month, year);
-    const monthWeeks = weeks.slice(0, 5);
+    const monthWeeks = weeks;
+
+    let filteredMachines = machines;
+    if (minifabricaId) filteredMachines = filteredMachines.filter(m => m.minifabrica === minifabricaId);
+    if (sector) filteredMachines = filteredMachines.filter(m => m.sector === sector);
+
+    console.log('Filtered machines:', filteredMachines.length);
+    
+    const sectors = [...new Set(filteredMachines.map(m => m.sector).filter(Boolean))];
+    console.log('Sectors found:', sectors);
+
+    if (sectors.length === 0) {
+      console.log('Nenhum setor encontrado');
+      return [];
+    }
 
     monthWeeks.forEach((weekNumber, weekIdx) => {
-      const templateWeekNum = (weekIdx % 5) + 1;
-      const weekAuditors = weekTemplates[templateWeekNum] || [];
-
-      if (weekAuditors.length === 0) return;
-
-      const numAuditors = Math.min(weekAuditors.length, 5);
-      const numLocations = locationIds.length;
-      const numChecklists = checklists.length;
-
-      const weekAssigned = new Set<string>();
-
-      for (let dayIdx = 0; dayIdx < 5; dayIdx++) {
-        const dayKey = dayIdx + 1;
-
-        for (let slot = 0; slot < numAuditors; slot++) {
-          const auditorId = weekAuditors[slot];
-          const locationOffset = (weekIdx * numAuditors + dayIdx * numAuditors + slot) % numLocations;
-          const locationId = locationIds[locationOffset];
-
-          let checklistId = '';
-          for (let ckAttempt = 0; ckAttempt < numChecklists; ckAttempt++) {
-            const candidateCkIdx = (dayIdx + slot + ckAttempt + weekIdx) % numChecklists;
-            const candidateId = checklists[candidateCkIdx].id;
-            const key = `${auditorId}-${candidateId}-${locationId}`;
-            if (!weekAssigned.has(key)) {
-              checklistId = candidateId;
-              weekAssigned.add(key);
-              break;
-            }
-          }
-
-          if (!checklistId) {
-            checklistId = checklists[(dayIdx + slot) % numChecklists].id;
-          }
-
-          const machine = allMachines.find(m => m.id === locationId);
-
+      sectors.forEach(sectorId => {
+        const sectorMachines = filteredMachines.filter(m => m.sector === sectorId);
+        sectorMachines.forEach((machine, idx) => {
+          const checklistIdx = (weekIdx + idx) % checklists.length;
           entries.push({
             id: generateId(),
             weekNumber,
-            dayOfWeek: dayKey,
+            dayOfWeek: (idx % 5) + 1,
             month,
             year,
-            employeeId: auditorId,
-            machineId: locationId,
-            sectorId: sector || machine?.sector || '',
-            minifabricaId: minifabricaId || machine?.minifabrica || '',
-            checklistId,
+            employeeId: '',
+            machineId: machine.id,
+            sectorId: sectorId,
+            minifabricaId: minifabricaId || machine.minifabrica || '',
+            checklistId: checklists[checklistIdx].id,
             status: 'pending',
           });
-        }
-      }
+        });
+      });
     });
 
+    console.log('Total entries created:', entries.length);
     const existing = store.getSchedule().filter(e => !(e.month === month && e.year === year));
-    const all = [...existing, ...entries];
-    store.saveSchedule(all);
+    store.saveSchedule([...existing, ...entries]);
     return entries;
   },
 

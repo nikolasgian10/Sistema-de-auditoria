@@ -44,6 +44,12 @@ function getStatusLabel(entry: ScheduleEntry, audits: AuditRecord[]): string {
   return 'Parcial';
 }
 
+function getChecklistShortName(fullName: string): string {
+  if (!fullName) return '';
+  const parts = fullName.split('-');
+  return parts[parts.length - 1].trim();
+}
+
 export default function Schedule() {
   const now = new Date();
   const { userType, getEffectiveMinifabrica } = useAuth();
@@ -64,16 +70,22 @@ export default function Schedule() {
   const employees = allUsers;
   const { data: dbMachines = [] } = useMachines();
   const { data: dbChecklists = [] } = useChecklists();
-  const sectors = store.getSectors();
   const machines = dbMachines;
   const checklists = dbChecklists.map(c => ({ id: c.id, name: c.name, category: c.category, items: c.items.map(it => ({ id: it.id, question: it.question, explanation: it.explanation, type: it.type as 'ok_nok' | 'text' | 'number' })), createdAt: c.created_at }));
   const audits = store.getAudits();
+
+  // Get sectors from actual machines (Supabase), not localStorage
+  const sectors = useMemo(() => {
+    const sectorNames = [...new Set(machines.map(m => m.sector).filter(Boolean))];
+    return sectorNames.map(name => ({ id: name, name }));
+  }, [machines]);
 
   const machinesFiltered = sectorFilter ? machines.filter(m => m.sector === sectorFilter) : machines;
   const employeesFiltered = sectorFilter ? employees.filter(e => e.minifabrica === sectorFilter) : employees;
 
   const machineById = useMemo(() => new Map(machines.map(m => [m.id, m])), [machines]);
   const getEntrySector = useCallback((entry: ScheduleEntry) => entry.sectorId || machineById.get(entry.machineId)?.sector || '', [machineById]);
+  const getEntryMinifabrica = useCallback((entry: ScheduleEntry) => entry.minifabricaId || machineById.get(entry.machineId)?.minifabrica || '', [machineById]);
 
   const modelForSector = useMemo(() => {
     if (!sectorFilter) return scheduleModel;
@@ -82,13 +94,17 @@ export default function Schedule() {
 
   const visibleSchedule = useMemo(() => {
     if (!sectorFilter) return schedule;
-    return schedule.filter(entry => getEntrySector(entry) === sectorFilter);
-  }, [schedule, sectorFilter, getEntrySector]);
+    const filtered = schedule.filter(entry => getEntryMinifabrica(entry) === sectorFilter);
+    console.log('DEBUG visibleSchedule:', { totalSchedule: schedule.length, sectorFilter, visibleLength: filtered.length });
+    return filtered;
+  }, [schedule, sectorFilter, getEntryMinifabrica]);
 
-  const filtered = useMemo(() =>
-    visibleSchedule.filter(s => s.month === month && s.year === year).sort((a, b) => a.weekNumber - b.weekNumber || a.dayOfWeek - b.dayOfWeek),
-    [visibleSchedule, month, year]
-  );
+  const filtered = useMemo(() => {
+    const result = visibleSchedule.filter(s => s.month === month && s.year === year).sort((a, b) => a.weekNumber - b.weekNumber || a.dayOfWeek - b.dayOfWeek);
+    console.log('DEBUG filtered:', { visibleScheduleLength: visibleSchedule.length, filteredLength: result.length, month, year, sectorFilter });
+    if (result.length === 0) console.log('No entries match: month', month, 'year', year);
+    return result;
+  }, [visibleSchedule, month, year, sectorFilter]);
 
   const histFiltered = useMemo(() =>
     visibleSchedule.filter(s => s.month === histMonth && s.year === histYear).sort((a, b) => a.weekNumber - b.weekNumber || a.dayOfWeek - b.dayOfWeek),
@@ -108,46 +124,25 @@ export default function Schedule() {
     return { total: allMissed.length, allMissed, auditorRanking, sectorRanking };
   }, [visibleSchedule, employees, sectors]);
 
-  // Auto-generate schedule when missing for the selected month/year
-  useEffect(() => {
-    if (isAdmin) return;
-    if (sectors.length === 0 || checklists.length === 0 || employees.length === 0) return;
-
-    const existingEntries = visibleSchedule.filter(s => s.month === month && s.year === year);
-    const weeksIso = getWeeksOfMonthISO(month, year);
-
-    const hasStaleWeeks = existingEntries.some(e => !weeksIso.includes(e.weekNumber));
-    if (hasStaleWeeks) {
-      const cleaned = schedule.filter(e => !(e.month === month && e.year === year && !weeksIso.includes(e.weekNumber)));
-      store.saveSchedule(cleaned);
-      store.generateSchedule(month, year, sectorFilter || undefined);
-      setSchedule(store.getSchedule());
-      return;
-    }
-
-    const sectorIds = sectorFilter
-      ? [sectorFilter]
-      : [...new Set(machinesFiltered.map(m => m.sector))].filter(Boolean);
-
-    const existingKeys = new Set(existingEntries.map(e => `${e.weekNumber}-${getEntrySector(e)}-${e.dayOfWeek}`));
-    const missing = weeksIso.some(weekNumber =>
-      sectorIds.some(sectorId =>
-        WEEK_DAYS.slice(0, 5).some(day => !existingKeys.has(`${weekNumber}-${sectorId}-${day.key}`))
-      )
-    );
-
-    if (missing) {
-      store.generateSchedule(month, year, sectorFilter || undefined);
-      setSchedule(store.getSchedule());
-    }
-  }, [month, year]);
-
   const handleGenerate = () => {
     if (isAdmin) { toast.error('Apenas diretores e gestores podem gerar o cronograma'); return; }
-    if (sectors.length === 0 || checklists.length === 0 || employees.length === 0) { toast.error('Cadastre setores, checklists e funcionários antes de gerar'); return; }
-    store.generateSchedule(month, year, sectorFilter || undefined);
-    setSchedule(store.getSchedule());
-    toast.success(`Cronograma de ${MONTHS[month]} gerado com sucesso!`);
+    console.log('Debug:', { sectors: sectors.length, checklists: checklists.length, employees: employees.length, machines: machines.length });
+    if (sectors.length === 0) { toast.error('Nenhum setor encontrado. Cadastre máquinas com setores.'); return; }
+    if (checklists.length === 0) { toast.error('Nenhum checklist encontrado.'); return; }
+    if (employees.length === 0) { toast.error('Nenhum funcionário encontrado.'); return; }
+    const result = store.generateSchedule(month, year, sectorFilter || undefined, undefined, machines, dbChecklists);
+    console.log('Schedule gerado:', result.length, 'entradas');
+    console.log('Entradas criadas:', result);
+    const allSchedule = store.getSchedule();
+    console.log('Schedule total após geração:', allSchedule.length, 'entradas');
+    console.log('Schedule data:', allSchedule);
+    setSchedule(allSchedule);
+    console.log('Month:', month, 'Year:', year, 'Sector Filter:', sectorFilter);
+    if (result.length === 0) {
+      toast.error('Nenhuma entrada gerada. Verifique os dados.');
+    } else {
+      toast.success(`Cronograma de ${MONTHS[month]} gerado com sucesso! (${result.length} entradas)`);
+    }
   };
 
   const handleSaveModel = () => {
@@ -160,10 +155,11 @@ export default function Schedule() {
     toast.success('Modelo limpo para esta minifábrica.');
   };
 
-  const handleModelChange = (weekIndex: number, dayOfWeek: number, employeeId: string) => {
-    if (!sectorFilter) return;
+  const handleModelChange = (weekIndex: number, dayOfWeek: number, employeeId: string, customSectorId?: string) => {
+    const sector = customSectorId || sectorFilter;
+    if (!sector) return;
     setScheduleModel(prev => {
-      const existingIndex = prev.findIndex(m => m.weekIndex === weekIndex && m.dayOfWeek === dayOfWeek && m.sectorId === sectorFilter);
+      const existingIndex = prev.findIndex(m => m.weekIndex === weekIndex && m.dayOfWeek === dayOfWeek && m.sectorId === sector);
       if (!employeeId) {
         if (existingIndex === -1) return prev;
         return prev.filter((_, i) => i !== existingIndex);
@@ -171,7 +167,7 @@ export default function Schedule() {
       if (existingIndex >= 0) {
         return prev.map((m, i) => i === existingIndex ? { ...m, employeeId } : m);
       }
-      return [...prev, { id: Math.random().toString(36).substring(2, 11), weekIndex, dayOfWeek, sectorId: sectorFilter, employeeId }];
+      return [...prev, { id: Math.random().toString(36).substring(2, 11), weekIndex, dayOfWeek, sectorId: sector, employeeId }];
     });
   };
 
@@ -192,7 +188,7 @@ export default function Schedule() {
       employeeId: '',
       machineId: '',
       sectorId,
-      minifabricaId: '',
+      minifabricaId: sectorFilter || '',
       checklistId: '',
       status: 'pending' as const,
     };
@@ -205,13 +201,13 @@ export default function Schedule() {
     if (!editEntry.id) {
       store.addScheduleEntry({
         weekNumber: editEntry.weekNumber,
-        dayOfWeek: editForm.dayOfWeek,
+        dayOfWeek: editEntry.dayOfWeek,
         month: editEntry.month ?? month,
         year: editEntry.year ?? year,
         employeeId: editForm.employeeId,
         machineId: editForm.machineId,
         sectorId: editEntry.sectorId,
-        minifabricaId: editEntry.minifabricaId || '',
+        minifabricaId: editEntry.minifabricaId,
         checklistId: editForm.checklistId,
         status: 'pending',
       });
@@ -276,22 +272,34 @@ export default function Schedule() {
 
     const emp = employees.find(e => e.id === entry.employeeId);
     const ck = checklists.find(c => c.id === entry.checklistId);
+    const machine = machines.find(m => m.id === entry.machineId);
     const statusText = getStatusLabel(entry, audits);
     const cellBg = getStatusColor(entry, audits);
 
     return (
-      <div className={`group relative px-1.5 py-1 rounded border ${cellBg}`}>
-        <div className="flex items-baseline gap-1">
-          <span className="text-[8px] text-muted-foreground/60 uppercase font-bold">Quem</span>
-          <span className="font-bold text-[11px] leading-tight">{emp?.name || 'N/A'}</span>
-        </div>
-        <div className="text-[9px] text-muted-foreground mt-0.5">{ck?.name || ''}</div>
-        <div className="flex items-baseline gap-1 mt-0.5">
-          <span className="text-[8px] text-muted-foreground/60 uppercase font-bold">Status</span>
-          <span className="text-[9px] font-medium">{statusText}</span>
-        </div>
+      <div className={`group relative px-2 py-1.5 rounded border text-xs ${cellBg}`}>
+        {/* Employee Name - Bold and Prominent */}
+        <div className="font-bold text-[11px] leading-tight mb-0.5">{emp?.name || 'N/A'}</div>
+        
+        {/* Checklist Category */}
+        {ck && (
+          <div className="text-[8px] text-muted-foreground/70 mb-0.5">
+            {ck.category || ''}
+          </div>
+        )}
+        
+        {/* Machine Info */}
+        {machine && (
+          <div className="text-[8px] text-muted-foreground/60 mb-0.5">
+            {machine.name}
+          </div>
+        )}
+        
+        {/* Status */}
+        <div className="text-[8px] font-medium text-muted-foreground/80">{statusText}</div>
+        
         {!isHistory && !isAdmin && (
-          <div className="absolute top-0 right-0 hidden group-hover:flex gap-0.5">
+          <div className="absolute top-0.5 right-0.5 hidden group-hover:flex gap-0.5">
             <button onClick={() => handleEditOpen(entry)} className="p-0.5 rounded hover:bg-accent/20">
               <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
             </button>
@@ -349,8 +357,8 @@ export default function Schedule() {
                 {WEEK_DAYS.map(d => (
                   <th key={d.key} className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center min-w-[120px] uppercase">{d.label}</th>
                 ))}
-                <th className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center min-w-[80px]">NÍVEL 02{'\n'}SEMANAL</th>
-                <th className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center min-w-[80px]">DEMAIS{'\n'}NÍVEIS</th>
+                <th className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center min-w-[120px]">NÍVEL 02{'\n'}SEMANAL</th>
+                <th className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center min-w-[120px]">DEMAIS{'\n'}NÍVEIS</th>
               </tr>
             </thead>
             <tbody>
@@ -366,12 +374,12 @@ export default function Schedule() {
                       {row.sectorName}
                     </td>
                     {WEEK_DAYS.map(day => (
-                      <td key={day.key} className="border border-border p-1 align-top min-w-[120px]">
+                      <td key={day.key} className="border border-border p-1.5 align-top min-w-[150px]">
                         {renderCell(row.byDay[day.key], isHistory, weekNum, row.sectorId, day.key)}
                       </td>
                     ))}
                     {/* Nível 02 Semanal */}
-                    <td className="border border-border p-1 align-top text-center">
+                    <td className="border border-border p-1.5 align-top text-center">
                       {rIdx === 0 && row.byDay[WEEK_DAYS[0].key] ? (() => {
                         const entry = row.byDay[WEEK_DAYS[0].key]!;
                         const emp = employees.find(e => e.id === entry.employeeId);
@@ -384,7 +392,7 @@ export default function Schedule() {
                       })() : null}
                     </td>
                     {/* Demais Níveis */}
-                    <td className="border border-border p-1 align-top text-center">
+                    <td className="border border-border p-1.5 align-top text-center">
                       {rIdx === 0 && row.byDay[WEEK_DAYS[5]?.key] ? (() => {
                         const entry = row.byDay[WEEK_DAYS[5].key]!;
                         const emp = employees.find(e => e.id === entry.employeeId);
@@ -604,7 +612,7 @@ export default function Schedule() {
                           <TableCell>{WEEK_DAYS.find(d => d.key === entry.dayOfWeek)?.label || '—'}</TableCell>
                           <TableCell>{emp?.name || 'N/A'}</TableCell>
                           <TableCell>{setor?.name || 'N/A'}</TableCell>
-                          <TableCell>{ck?.name || 'N/A'}</TableCell>
+                          <TableCell>{ck?.name ? getChecklistShortName(ck.name) : 'N/A'}</TableCell>
                         </TableRow>
                       );
                     })}
@@ -615,73 +623,64 @@ export default function Schedule() {
           </Card>
         </TabsContent>
 
-        {userType === 'diretor' && (
-          <TabsContent value="model" className="space-y-4">
-            <Card>
-              <div className="flex flex-wrap items-center justify-between gap-2 p-4 border-b">
-                <div>
-                  <h3 className="text-base font-bold">Modelo Anual de Cronograma</h3>
-                  <p className="text-xs text-muted-foreground">Defina quais auditores ficam em cada posição (até 5 semanas) para sua minifábrica.</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleClearModel}>
-                    <Trash2 className="mr-1 h-3 w-3" />Limpar Modelo
-                  </Button>
-                  <Button size="sm" onClick={handleSaveModel}>
-                    <Save className="mr-1 h-3 w-3" />Salvar Modelo
-                  </Button>
-                </div>
-              </div>
-
-              <CardContent className="p-0 overflow-x-auto">
-                <table className="w-full text-xs border-collapse">
+        <TabsContent value="model">
+          <Card>
+            <CardContent className="p-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px] border-collapse border">
                   <thead>
                     <tr className="bg-blue-800 text-white">
-                      <th className="border border-blue-600 px-2 py-1.5 text-[10px] font-bold text-center">Semana</th>
-                      {WEEK_DAYS.map(d => (
-                        <th key={d.key} className="border border-blue-600 px-1 py-1.5 text-[10px] font-bold text-center uppercase">{d.label}</th>
-                      ))}
+                      <th className="border p-2">Semana</th>
+                      <th className="border p-2">Onde</th>
+                      <th className="border p-2">Segunda</th>
+                      <th className="border p-2">Terça</th>
+                      <th className="border p-2">Quarta</th>
+                      <th className="border p-2">Quinta</th>
+                      <th className="border p-2">Sexta</th>
+                      <th className="border p-2">Sábado</th>
+                      <th className="border p-2">Nível 02<br/>Semanal</th>
+                      <th className="border p-2">Demais<br/>Níveis</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[1, 2, 3, 4, 5].map(weekIndex => (
-                      <tr key={weekIndex} className="border-b border-border">
-                        <td className="border border-border px-2 py-2 text-center font-bold bg-muted/20">{weekIndex}</td>
-                        {WEEK_DAYS.map(day => {
-                          const modelEntry = modelForSector.find(m => m.weekIndex === weekIndex && m.dayOfWeek === day.key);
-                          return (
-                            <td key={day.key} className="border border-border p-1">
-                              <Select
-                                value={modelEntry?.employeeId || ''}
-                                onValueChange={v => handleModelChange(weekIndex, day.key, v)}
-                              >
-                                <SelectTrigger className="h-8 text-[10px]">
-                                  <SelectValue placeholder="(vazio)" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="">(vazio)</SelectItem>
-                                  {employeesFiltered.map(e => (
-                                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                                  ))}
-                                </SelectContent>
+                    {getWeeksOfMonthISO(month, year).map((w, wIdx) => (
+                      sectors.map((sectorObj, sIdx) => (
+                        <tr key={`${w}-${sectorObj.id}`}>
+                          {sIdx === 0 && <td rowSpan={sectors.length} className="border p-2 bg-gray-100 font-bold text-center align-middle">{w}</td>}
+                          <td className="border p-2 bg-gray-50 font-semibold">{sectorObj.name}</td>
+                          {[1, 2, 3, 4, 5, 6].map(d => (
+                            <td key={d} className="border p-1">
+                              <Select value={scheduleModel.find(m => m.weekIndex === w && m.dayOfWeek === d && m.sectorId === sectorObj.id)?.employeeId || ''} onValueChange={v => handleModelChange(w, d, v, sectorObj.id)}>
+                                <SelectTrigger className="h-7 text-[9px]"><SelectValue placeholder="-" /></SelectTrigger>
+                                <SelectContent>{employeesFiltered.map(e => <SelectItem key={e.id} value={e.id}>{e.name.split(' ')[0]}</SelectItem>)}</SelectContent>
                               </Select>
                             </td>
-                          );
-                        })}
-                      </tr>
+                          ))}
+                          <td className="border p-1">
+                            <Select value={scheduleModel.find(m => m.weekIndex === w && m.dayOfWeek === 10 && m.sectorId === sectorObj.id)?.employeeId || ''} onValueChange={v => handleModelChange(w, 10, v, sectorObj.id)}>
+                              <SelectTrigger className="h-7 text-[9px]"><SelectValue placeholder="-" /></SelectTrigger>
+                              <SelectContent>{employeesFiltered.map(e => <SelectItem key={e.id} value={e.id}>{e.name.split(' ')[0]}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </td>
+                          <td className="border p-1">
+                            <Select value={scheduleModel.find(m => m.weekIndex === w && m.dayOfWeek === 11 && m.sectorId === sectorObj.id)?.employeeId || ''} onValueChange={v => handleModelChange(w, 11, v, sectorObj.id)}>
+                              <SelectTrigger className="h-7 text-[9px]"><SelectValue placeholder="-" /></SelectTrigger>
+                              <SelectContent>{employeesFiltered.map(e => <SelectItem key={e.id} value={e.id}>{e.name.split(' ')[0]}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </td>
+                        </tr>
+                      ))
                     ))}
                   </tbody>
                 </table>
-              </CardContent>
-
-              <div className="p-3 border-t bg-muted/20">
-                <p className="text-xs text-muted-foreground">
-                  Nota: ao gerar o cronograma, o sistema usará este modelo e ajustará o número de semanas conforme o mês selecionado (meses com 4 semanas ignoram a 5ª semana).
-                </p>
               </div>
-            </Card>
-          </TabsContent>
-        )}
+              <div className="mt-4 flex gap-2">
+                <Button onClick={handleSaveModel}>Salvar Modelo</Button>
+                <Button variant="outline" onClick={() => { setScheduleModel([]); toast.success('Modelo limpo'); }}>Limpar</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Edit Entry Dialog */}

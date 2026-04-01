@@ -11,6 +11,7 @@ interface LPAItem {
   area: string;
   question: string;
   explanation: string;
+  type: 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade';
   status: 'pending' | 'conforme' | 'nao_conforme' | 'na';
   responsible: string;
   actionImmediate: boolean;
@@ -20,10 +21,10 @@ interface LPAItem {
 const AREAS = ['MÁQUINA', 'PROCESSO', 'PRODUTO', 'QMS', 'SEGURANÇA', '5S'];
 
 const defaultItems: LPAItem[] = [
-  { id: '1', area: 'MÁQUINA', question: 'Existe alguma adaptação feita na operação que pode gerar risco de segurança ao operador?', explanation: 'Verificar se na operação existem adaptações não oficiais na máquina (Arames, amarrações, panos de contenção...)', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
-  { id: '2', area: 'MÁQUINA', question: 'Existe algum problema de máquina ao qual a manutenção ainda não foi acionada?', explanation: 'Verificar se existe algum problema com a máquina o qual não foi aberta nota de manutenção', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
-  { id: '3', area: 'MÁQUINA', question: 'O sistema hidráulico e pneumático possui vazamento visível ou audível?', explanation: 'Verificar se há algum vazamento perceptível. Verificar se o manômetro e/ou barômetros estão registrando conforme a especificação do processo.', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
-  { id: '4', area: 'MÁQUINA', question: 'A manutenção preventiva foi realizada conforme o cronograma (quando aplicável)?', explanation: 'Verificar se o cronograma de manutenção está sendo seguido.', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
+  { id: '1', area: 'MÁQUINA', question: 'Existe alguma adaptação feita na operação que pode gerar risco de segurança ao operador?', explanation: 'Verificar se na operação existem adaptações não oficiais na máquina (Arames, amarrações, panos de contenção...)', type: 'ok_nok', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
+  { id: '2', area: 'MÁQUINA', question: 'Existe algum problema de máquina ao qual a manutenção ainda não foi acionada?', explanation: 'Verificar se existe algum problema com a máquina o qual não foi aberta nota de manutenção', type: 'ok_nok', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
+  { id: '3', area: 'MÁQUINA', question: 'O sistema hidráulico e pneumático possui vazamento visível ou audível?', explanation: 'Verificar se há algum vazamento perceptível. Verificar se o manômetro e/ou barômetros estão registrando conforme a especificação do processo.', type: 'ok_nok', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
+  { id: '4', area: 'MÁQUINA', question: 'A manutenção preventiva foi realizada conforme o cronograma (quando aplicável)?', explanation: 'Verificar se o cronograma de manutenção está sendo seguido.', type: 'ok_nok', status: 'pending', responsible: '', actionImmediate: false, escalate: false },
 ];
 
 export default function ChecklistTemplate() {
@@ -55,6 +56,7 @@ export default function ChecklistTemplate() {
         setSideLabel(ck.category.toUpperCase());
         setItems(ck.items.map(item => ({
           id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
+          type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
           status: 'pending' as const, responsible: '', actionImmediate: false, escalate: false,
         })));
       }
@@ -68,7 +70,7 @@ export default function ChecklistTemplate() {
   const addItem = () => {
     setItems(prev => [...prev, {
       id: Math.random().toString(36).substr(2, 9),
-      area: 'MÁQUINA', question: '', explanation: '',
+      area: 'MÁQUINA', question: '', explanation: '', type: 'ok_nok',
       status: 'pending', responsible: '', actionImmediate: false, escalate: false,
     }]);
   };
@@ -83,6 +85,7 @@ export default function ChecklistTemplate() {
     setSideLabel(ck.category.toUpperCase());
     setItems(ck.items.map(item => ({
       id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
+      type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
       status: 'pending' as const, responsible: '', actionImmediate: false, escalate: false,
     })));
     toast.success(`Carregado: ${ck.name}`);
@@ -100,7 +103,7 @@ export default function ChecklistTemplate() {
     const checklistData = {
       name: title,
       category: sideLabel,
-      items: items.map(it => ({ question: it.question, explanation: it.explanation, type: 'ok_nok' })),
+      items: items.map(it => ({ question: it.question, explanation: it.explanation, type: it.type })),
     };
     if (editingId || selectedChecklist) {
       const idToUpdate = editingId || selectedChecklist;
@@ -256,6 +259,17 @@ export default function ChecklistTemplate() {
               <textarea className="w-full h-full bg-transparent outline-none text-xs resize-none min-h-[60px] text-neutral-600"
                 value={item.explanation} onChange={e => updateItem(item.id, 'explanation', e.target.value)}
                 placeholder="Explicação / orientação..." />
+              <div className="mt-2 text-[9px]">
+                <label className="block font-semibold text-neutral-700 mb-1">Tipo:</label>
+                <select className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs outline-none"
+                  value={item.type} onChange={e => updateItem(item.id, 'type', e.target.value as any)}>
+                  <option value="ok_nok">OK/NÃO OK</option>
+                  <option value="text">Texto</option>
+                  <option value="number">Número</option>
+                  <option value="pessoas">Pessoas</option>
+                  <option value="rastreabilidade">Rastreabilidade</option>
+                </select>
+              </div>
             </div>
             <button onClick={() => removeItem(item.id)}
               className="absolute right-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 no-print">
