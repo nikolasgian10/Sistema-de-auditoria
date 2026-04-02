@@ -100,8 +100,12 @@ export default function ChecklistTemplate() {
 
   const handleSaveChecklist = async () => {
     if (!title || items.length === 0) { toast.error('Título e pelo menos um item são obrigatórios'); return; }
+    
+    // Remover "LPA N1 – " do título se estiver lá
+    const cleanTitle = title.replace(/^LPA N1 – /, '').trim();
+    
     const checklistData = {
-      name: title,
+      name: cleanTitle,
       category: sideLabel,
       items: items.map(it => ({ question: it.question, explanation: it.explanation, type: it.type })),
     };
@@ -147,9 +151,9 @@ export default function ChecklistTemplate() {
     win.document.write(`<div class="footer"><span>${sideLabel}</span><span>${formCode}</span></div></div>`);
     win.document.write(`<div class="page"><div class="side">${sideLabel}</div><div class="title-bar">${title}</div>`);
     win.document.write(`<div class="hdr"><strong>NOME AUDITOR:</strong> ${auditorName || '_______________________'} &nbsp;&nbsp; <strong>EP MÁQUINA:</strong> _______________________</div>`);
-    win.document.write(`<div style="display:grid;background:#e8e8e8;font-weight:bold;font-size:10px;border-bottom:2px solid #222;grid-template-columns:70px 50px 1fr;padding-right:36px"><div style="padding:4px;border-right:1px solid #bbb;text-align:center">ITEM</div><div style="padding:4px;border-right:1px solid #bbb;text-align:center">STATUS</div><div style="padding:4px;text-align:center">AÇÃO SE REPROVADO / RESPONSÁVEL</div></div>`);
+    win.document.write(`<div style="display:grid;background:#e8e8e8;font-weight:bold;font-size:10px;border-bottom:2px solid #222;grid-template-columns:70px 50px 1fr 1fr;padding-right:36px"><div style="padding:4px;border-right:1px solid #bbb;text-align:center">ITEM</div><div style="padding:4px;border-right:1px solid #bbb;text-align:center">STATUS</div><div style="padding:4px;border-right:1px solid #bbb;text-align:center">AÇÃO SE REPROVADO</div><div style="padding:4px;text-align:center">RESPONSÁVEL</div></div>`);
     items.forEach(item => {
-      win.document.write(`<div style="border-bottom:1px solid #bbb;padding-right:36px"><div style="display:grid;grid-template-columns:70px 50px 1fr"><div class="item-area">${item.area}</div><div class="status-col">${renderStatusBadge(item.status)}</div><div style="padding:6px;font-size:10px"><div><strong>Ação Imediata:</strong> ${item.actionImmediate ? '☑' : '☐'} Acionar mestre e instruir colaborador</div><div><strong>Escalonar:</strong> ${item.escalate ? '☑' : '☐'} via SFM</div><div style="margin-top:4px"><strong>Resp.:</strong> ${item.responsible || '________________________'}</div></div></div></div>`);
+      win.document.write(`<div style="border-bottom:1px solid #bbb;padding-right:36px;display:grid;grid-template-columns:70px 50px 1fr 1fr"><div class="item-area">${item.area}</div><div class="status-col">${renderStatusBadge(item.status)}</div><div style="border-right:1px solid #bbb;padding:6px;font-size:10px"><div><strong>Ação Imediata:</strong> ${item.actionImmediate ? '☑' : '☐'} Acionar mestre e instruir colaborador</div><div><strong>Escalonar:</strong> ${item.escalate ? '☑' : '☐'} via SFM</div></div><div style="padding:6px;font-size:10px"><div><strong>Resp.:</strong> ${item.responsible || '________________________'}</div></div></div>`);
     });
     win.document.write(`<div style="padding:4px 50px 4px 12px;font-size:9px;color:#666;border-bottom:1px solid #ccc">Utilizar na coluna status: R. (reprovado); A. (aprovado); NA (não aplicável).</div>`);
     win.document.write(`<div class="footer"><span>${sideLabel}</span><span>${formCode}</span></div></div></body></html>`);
@@ -165,7 +169,7 @@ export default function ChecklistTemplate() {
     };
     const c = statusColor(item.status);
     return (
-      <button onClick={cycle} className="w-10 h-8 rounded font-bold text-xs border-2 transition-all hover:scale-110" style={{ background: c.bg, color: c.text, borderColor: c.bg === '#e5e5e5' ? '#bbb' : c.bg }}>
+      <button onClick={cycle} className="w-10 h-8 rounded font-bold text-xs border-2 transition-all" style={{ background: c.bg, color: c.text, borderColor: c.bg === '#e5e5e5' ? '#bbb' : c.bg }}>
         {c.label}
       </button>
     );
@@ -256,20 +260,9 @@ export default function ChecklistTemplate() {
                 placeholder="Pergunta da auditoria..." />
             </div>
             <div className="p-2">
-              <textarea className="w-full h-full bg-transparent outline-none text-xs resize-none min-h-[60px] text-neutral-600"
+              <textarea className="w-full bg-transparent outline-none text-xs resize-none min-h-[60px]"
                 value={item.explanation} onChange={e => updateItem(item.id, 'explanation', e.target.value)}
                 placeholder="Explicação / orientação..." />
-              <div className="mt-2 text-[9px]">
-                <label className="block font-semibold text-neutral-700 mb-1">Tipo:</label>
-                <select className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs outline-none"
-                  value={item.type} onChange={e => updateItem(item.id, 'type', e.target.value as any)}>
-                  <option value="ok_nok">OK/NÃO OK</option>
-                  <option value="text">Texto</option>
-                  <option value="number">Número</option>
-                  <option value="pessoas">Pessoas</option>
-                  <option value="rastreabilidade">Rastreabilidade</option>
-                </select>
-              </div>
             </div>
             <button onClick={() => removeItem(item.id)}
               className="absolute right-10 top-1 opacity-0 group-hover:opacity-100 transition-opacity text-red-500 no-print">
@@ -311,7 +304,7 @@ export default function ChecklistTemplate() {
               style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', minHeight: '90px' }}>
               {item.area}
             </div>
-            <div className="border-r border-black/20 flex items-center justify-center p-1">
+            <div className="border-r border-black/20 flex items-center justify-center p-1 overflow-hidden">
               <StatusButton item={item} />
             </div>
             <div className="border-r border-black/20 p-2 text-[10px] space-y-1">
