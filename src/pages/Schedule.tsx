@@ -147,7 +147,7 @@ export default function Schedule() {
     if (sectors.length === 0) { toast.error('Nenhum setor encontrado. Cadastre máquinas com setores.'); return; }
     if (checklists.length === 0) { toast.error('Nenhum checklist encontrado.'); return; }
     if (employees.length === 0) { toast.error('Nenhum funcionário encontrado.'); return; }
-    const result = store.generateSchedule(month, year, sectorFilter || undefined, undefined, machines, dbChecklists);
+    const result = store.generateSchedule(month, year, sectorFilter || undefined, undefined, machines, dbChecklists, scheduleModel);
     console.log('Schedule gerado:', result.length, 'entradas');
     console.log('Entradas criadas:', result);
     const allSchedule = store.getSchedule();

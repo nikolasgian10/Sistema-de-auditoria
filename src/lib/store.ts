@@ -102,6 +102,26 @@ function normalizeMinifabrica(value?: string | null): string {
   return normalizeText(value);
 }
 
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const x = Math.sin(seed + i) * 10000;
+    const j = Math.floor((x - Math.floor(x)) * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function formatSectorName(value?: string | null): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  return normalized
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 // --- Store API ---
 export const store = {
   // Sectors (derived from machines for a given minifábrica)
@@ -115,7 +135,7 @@ export const store = {
     filtered.forEach(m => {
       const normalized = normalizeSector(m.sector);
       if (normalized && !sectorMap.has(normalized)) {
-        sectorMap.set(normalized, String(m.sector || '').trim());
+        sectorMap.set(normalized, formatSectorName(m.sector));
       }
     });
 
@@ -194,11 +214,12 @@ export const store = {
   getSchedule: (): ScheduleEntry[] => load('lpa_schedule', []),
   saveSchedule: (data: ScheduleEntry[]) => save('lpa_schedule', data),
 
-  generateSchedule: (month: number, year: number, minifabricaId?: string, sector?: string, machinesData?: any[], checklistsData?: any[]): ScheduleEntry[] => {
+  generateSchedule: (month: number, year: number, minifabricaId?: string, sector?: string, machinesData?: any[], checklistsData?: any[], scheduleModelData?: ScheduleModelEntry[]): ScheduleEntry[] => {
     // Use provided data (from Supabase) or fallback to localStorage
     const machines = machinesData || store.getMachines();
     const checklists = checklistsData || store.getChecklists();
-    console.log('generateSchedule input:', { month, year, minifabricaId, sector, machinesCount: machines.length, checklistsCount: checklists.length });
+    const scheduleModel = scheduleModelData || store.getScheduleModel();
+    console.log('generateSchedule input:', { month, year, minifabricaId, sector, machinesCount: machines.length, checklistsCount: checklists.length, scheduleModelCount: scheduleModel.length });
     
     if (checklists.length === 0 || machines.length === 0) {
       console.log('Sem checklists ou máquinas');
@@ -228,39 +249,72 @@ export const store = {
       return [];
     }
 
+    const modelByWeek: Record<number, ScheduleModelEntry[]> = {};
+    scheduleModel.forEach(m => {
+      if (m.weekIndex >= 0 && m.weekIndex < monthWeeks.length) {
+        const weekList = modelByWeek[m.weekIndex] || [];
+        weekList.push(m);
+        modelByWeek[m.weekIndex] = weekList;
+      }
+    });
+
     monthWeeks.forEach((weekNumber, weekIdx) => {
-      sectors.forEach(sectorId => {
-        const sectorMachines = filteredMachines.filter(m => normalizeSector(m.sector) === sectorId);
-        const usedDays = new Set<number>();
+      const weekModel = modelByWeek[weekIdx] || [];
 
-        sectorMachines.forEach((machine, idx) => {
-          if (usedDays.size >= 5) return; // max 5 weekdays per sector
+      // For random sector order by week (to vary where each funcionario audits)
+      const sectorOrder = seededShuffle(sectors, weekIdx);
 
-          const candidateDay = (idx % 5) + 1;
-          if (usedDays.has(candidateDay)) return;
+      if (weekModel.length > 0) {
+        // Use the fixed model to map employee -> day + sector
+        weekModel.forEach(modelItem => {
+          const sectorId = normalizeSector(modelItem.sectorId);
+          const sectorMachines = filteredMachines.filter(m => normalizeSector(m.sector) === sectorId);
+          if (sectorMachines.length === 0) return;
 
-          usedDays.add(candidateDay);
-          const checklistIdx = (weekIdx + idx) % checklists.length;
+          const machine = sectorMachines[weekIdx % sectorMachines.length];
+          const checklist = checklists[(weekIdx + modelItem.dayOfWeek - 1) % checklists.length];
 
           entries.push({
             id: generateId(),
             weekNumber,
-            dayOfWeek: candidateDay,
+            dayOfWeek: modelItem.dayOfWeek,
+            month,
+            year,
+            employeeId: modelItem.employeeId,
+            machineId: machine.id,
+            sectorId,
+            minifabricaId: normalizeMinifabrica(minifabricaId || machine.minifabrica || ''),
+            checklistId: checklist.id,
+            status: 'pending',
+          });
+        });
+      } else {
+        // fallback: auto-generate based on sector order and machines
+        sectorOrder.forEach((sectorId, dayIndex) => {
+          if (dayIndex >= 5) return; // Mondays to Fridays
+          const sectorMachines = filteredMachines.filter(m => normalizeSector(m.sector) === sectorId);
+          if (sectorMachines.length === 0) return;
+          const machine = sectorMachines[weekIdx % sectorMachines.length];
+          const checklist = checklists[(weekIdx + dayIndex) % checklists.length];
+
+          entries.push({
+            id: generateId(),
+            weekNumber,
+            dayOfWeek: dayIndex + 1,
             month,
             year,
             employeeId: '',
             machineId: machine.id,
             sectorId,
             minifabricaId: normalizeMinifabrica(minifabricaId || machine.minifabrica || ''),
-            checklistId: checklists[checklistIdx].id,
+            checklistId: checklist.id,
             status: 'pending',
           });
         });
-      });
+      }
     });
 
     console.log('Total entries created:', entries.length);
-
     const uniqueMap = new Map<string, ScheduleEntry>();
     entries.forEach(entry => {
       const key = `${entry.weekNumber}-${entry.sectorId}-${entry.dayOfWeek}`;
