@@ -24,6 +24,8 @@ const WEEK_DAYS = [
   { key: 6, label: 'Sábado' },
 ];
 
+const normalizeText = (value?: string | null): string => String(value || '').trim().toLowerCase();
+
 function getStatusColor(entry: ScheduleEntry, audits: AuditRecord[]): string {
   if (entry.status === 'missed') return 'bg-red-500/20 border-red-500/40 text-red-700 dark:text-red-400';
   if (entry.status === 'pending') return 'bg-muted/30 border-border';
@@ -76,25 +78,33 @@ export default function Schedule() {
 
   // Get sectors from actual machines (Supabase), not localStorage
   const sectors = useMemo(() => {
-    const sectorNames = [...new Set(machines.map(m => m.sector).filter(Boolean))];
-    return sectorNames.map(name => ({ id: name, name }));
+    const sectorMap = new Map<string,string>();
+    machines.forEach(m => {
+      const normalized = normalizeText(m.sector);
+      if (normalized && !sectorMap.has(normalized)) {
+        sectorMap.set(normalized, String(m.sector || '').trim());
+      }
+    });
+    return Array.from(sectorMap.entries()).map(([id, name]) => ({ id, name }));
   }, [machines]);
 
-  const machinesFiltered = sectorFilter ? machines.filter(m => m.sector === sectorFilter) : machines;
-  const employeesFiltered = sectorFilter ? employees.filter(e => e.minifabrica === sectorFilter) : employees;
+  const machinesFiltered = sectorFilter ? machines.filter(m => normalizeText(m.sector) === normalizeText(sectorFilter)) : machines;
+  const employeesFiltered = sectorFilter ? employees.filter(e => normalizeText(e.minifabrica) === normalizeText(sectorFilter)) : employees;
 
   const machineById = useMemo(() => new Map(machines.map(m => [m.id, m])), [machines]);
-  const getEntrySector = useCallback((entry: ScheduleEntry) => entry.sectorId || machineById.get(entry.machineId)?.sector || '', [machineById]);
-  const getEntryMinifabrica = useCallback((entry: ScheduleEntry) => entry.minifabricaId || machineById.get(entry.machineId)?.minifabrica || '', [machineById]);
+  const getEntrySector = useCallback((entry: ScheduleEntry) => normalizeText(entry.sectorId || machineById.get(entry.machineId)?.sector || ''), [machineById]);
+  const getEntryMinifabrica = useCallback((entry: ScheduleEntry) => normalizeText(entry.minifabricaId || machineById.get(entry.machineId)?.minifabrica || ''), [machineById]);
 
   const modelForSector = useMemo(() => {
     if (!sectorFilter) return scheduleModel;
-    return scheduleModel.filter(m => m.sectorId === sectorFilter);
+    const normalizedFilter = normalizeText(sectorFilter);
+    return scheduleModel.filter(m => normalizeText(m.sectorId) === normalizedFilter);
   }, [scheduleModel, sectorFilter]);
 
   const visibleSchedule = useMemo(() => {
     if (!sectorFilter) return schedule;
-    const filtered = schedule.filter(entry => getEntryMinifabrica(entry) === sectorFilter);
+    const normalizedFilter = normalizeText(sectorFilter);
+    const filtered = schedule.filter(entry => normalizeText(getEntryMinifabrica(entry)) === normalizedFilter);
     console.log('DEBUG visibleSchedule:', { totalSchedule: schedule.length, sectorFilter, visibleLength: filtered.length });
     return filtered;
   }, [schedule, sectorFilter, getEntryMinifabrica]);
@@ -118,8 +128,15 @@ export default function Schedule() {
     const auditorRanking = [...byAuditor.entries()].map(([id, count]) => ({ employee: employees.find(e => e.id === id), count })).filter(r => r.employee).sort((a, b) => b.count - a.count);
 
     const bySector = new Map<string, number>();
-    allMissed.forEach(m => bySector.set(m.sectorId || '', (bySector.get(m.sectorId || '') || 0) + 1));
-    const sectorRanking = [...bySector.entries()].map(([id, count]) => ({ sector: sectors.find(s => s.id === id), count })).filter(r => r.sector).sort((a, b) => b.count - a.count);
+    allMissed.forEach(m => {
+      const normalizedSectorId = normalizeText(m.sectorId || '');
+      if (!normalizedSectorId) return;
+      bySector.set(normalizedSectorId, (bySector.get(normalizedSectorId) || 0) + 1);
+    });
+    const sectorRanking = [...bySector.entries()]
+      .map(([id, count]) => ({ sector: sectors.find(s => normalizeText(s.id) === id), count }))
+      .filter(r => r.sector)
+      .sort((a, b) => b.count - a.count);
 
     return { total: allMissed.length, allMissed, auditorRanking, sectorRanking };
   }, [visibleSchedule, employees, sectors]);
@@ -193,11 +210,26 @@ export default function Schedule() {
       status: 'pending' as const,
     };
     setEditEntry(newEntry);
-    setEditForm({ employeeId: '', machineId: '', checklistId: '', dayOfWeek });
+    // For special levels (10, 11), no machine selection needed
+    const needsMachine = dayOfWeek <= 6;
+    setEditForm({ employeeId: '', machineId: needsMachine ? '' : 'N/A', checklistId: '', dayOfWeek });
   };
 
   const handleEditSave = () => {
     if (!editEntry) return;
+    const needsMachine = editForm.dayOfWeek <= 6;
+    if (needsMachine && !editForm.machineId) {
+      toast.error('Selecione uma máquina para esta auditoria');
+      return;
+    }
+    if (!editForm.employeeId) {
+      toast.error('Selecione um funcionário');
+      return;
+    }
+    if (!editForm.checklistId) {
+      toast.error('Selecione um checklist');
+      return;
+    }
     if (!editEntry.id) {
       store.addScheduleEntry({
         weekNumber: editEntry.weekNumber,
@@ -205,7 +237,7 @@ export default function Schedule() {
         month: editEntry.month ?? month,
         year: editEntry.year ?? year,
         employeeId: editForm.employeeId,
-        machineId: editForm.machineId,
+        machineId: editForm.machineId || '',
         sectorId: editEntry.sectorId,
         minifabricaId: editEntry.minifabricaId,
         checklistId: editForm.checklistId,
@@ -218,7 +250,7 @@ export default function Schedule() {
     }
     store.updateScheduleEntry(editEntry.id, {
       employeeId: editForm.employeeId,
-      machineId: editForm.machineId,
+      machineId: editForm.machineId || '',
       checklistId: editForm.checklistId,
       dayOfWeek: editForm.dayOfWeek,
     });
@@ -236,20 +268,33 @@ export default function Schedule() {
 
   const handlePrint = () => window.print();
 
-  // Group entries by week -> sector
+  // Group entries by week -> sector (ONE ROW PER SECTOR - NO DUPLICATES)
   const groupByWeekSector = useCallback((entries: ScheduleEntry[]) => {
     const weeks = [...new Set(entries.map(e => e.weekNumber))].sort((a, b) => a - b);
     return weeks.map(weekNum => {
       const weekEntries = entries.filter(e => e.weekNumber === weekNum);
-      const sectorIds = [...new Set(weekEntries.map(e => e.sectorId || ''))].filter(Boolean);
-      const sectorRows = sectorIds.map(sectorId => {
-        const sector = sectors.find(s => s.id === sectorId);
-        const byDay: Record<number, ScheduleEntry | undefined> = {};
-        WEEK_DAYS.forEach(d => {
-          byDay[d.key] = weekEntries.find(e => (e.sectorId || '') === sectorId && e.dayOfWeek === d.key);
+      
+      // Get unique sectorIds - deduplicate with normalization
+      const uniqueSectorIds = Array.from(new Set(
+        weekEntries
+          .map(e => normalizeText(e.sectorId || ''))
+          .filter(id => id.length > 0)
+      ));
+      
+      // Create sectorRows - one per unique sectorId
+      const sectorRows = uniqueSectorIds.map(sectorId => {
+        const sector = sectors.find(s => normalizeText(s.id) === sectorId);
+        const sectorEntries = weekEntries.filter(e => normalizeText(e.sectorId || '') === sectorId);
+        const byDay: Record<number, ScheduleEntry[]> = {};
+        
+        // Include regular days (1-6) and special levels (10, 11)
+        [...WEEK_DAYS.map(d => d.key), 10, 11].forEach(d => {
+          byDay[d] = sectorEntries.filter(e => e.dayOfWeek === d);
         });
+        
         return { sectorId, sectorName: sector?.name || 'N/A', byDay };
       });
+      
       return { weekNum, sectorRows };
     });
   }, [sectors]);
@@ -257,8 +302,8 @@ export default function Schedule() {
   const grouped = useMemo(() => groupByWeekSector(filtered), [filtered, groupByWeekSector]);
   const histGrouped = useMemo(() => groupByWeekSector(histFiltered), [histFiltered, groupByWeekSector]);
 
-  const renderCell = (entry: ScheduleEntry | undefined, isHistory: boolean, weekNum?: number, sectorId?: string, dayKey?: number) => {
-    if (!entry) {
+  const renderCell = (entries: ScheduleEntry[] | undefined, isHistory: boolean, weekNum?: number, sectorId?: string, dayKey?: number) => {
+    if (!entries || entries.length === 0) {
       if (isHistory || isAdmin) return <span className="text-muted-foreground/30 text-[10px]">—</span>;
       return (
         <button
@@ -270,50 +315,48 @@ export default function Schedule() {
       );
     }
 
-    const emp = employees.find(e => e.id === entry.employeeId);
-    const ck = checklists.find(c => c.id === entry.checklistId);
-    const machine = machines.find(m => m.id === entry.machineId);
-    const statusText = getStatusLabel(entry, audits);
-    const cellBg = getStatusColor(entry, audits);
-
     return (
-      <div className={`group relative px-2 py-1.5 rounded border text-xs ${cellBg}`}>
-        {/* Employee Name - Bold and Prominent */}
-        <div className="font-bold text-[11px] leading-tight mb-0.5">{emp?.name || 'N/A'}</div>
-        
-        {/* Checklist Category */}
-        {ck && (
-          <div className="text-[8px] text-muted-foreground/70 mb-0.5">
-            {ck.category || ''}
-          </div>
-        )}
-        
-        {/* Machine Info */}
-        {machine && (
-          <div className="text-[8px] text-muted-foreground/60 mb-0.5">
-            {machine.name}
-          </div>
-        )}
-        
-        {/* Status */}
-        <div className="text-[8px] font-medium text-muted-foreground/80">{statusText}</div>
-        
-        {!isHistory && !isAdmin && (
-          <div className="absolute top-0.5 right-0.5 hidden group-hover:flex gap-0.5">
-            <button onClick={() => handleEditOpen(entry)} className="p-0.5 rounded hover:bg-accent/20">
-              <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
-            </button>
-            <button onClick={() => handleDelete(entry.id)} className="p-0.5 rounded hover:bg-destructive/20">
-              <Trash2 className="h-2.5 w-2.5 text-destructive" />
-            </button>
-          </div>
-        )}
+      <div className="space-y-1">
+        {entries.map(entry => {
+          const emp = employees.find(e => e.id === entry.employeeId);
+          const ck = checklists.find(c => c.id === entry.checklistId);
+          const statusText = getStatusLabel(entry, audits);
+          const cellBg = getStatusColor(entry, audits);
+
+          return (
+            <div key={entry.id} className={`group relative px-2 py-1.5 rounded border text-xs ${cellBg}`}>
+              {/* Employee Name - Bold and Prominent */}
+              <div className="font-bold text-[11px] leading-tight mb-0.5">{emp?.name || 'N/A'}</div>
+              
+              {/* Checklist Category */}
+              {ck && (
+                <div className="text-[8px] text-muted-foreground/70 mb-0.5">
+                  {ck.category || ''}
+                </div>
+              )}
+              
+              {/* Status */}
+              <div className="text-[8px] font-medium text-muted-foreground/80">{statusText}</div>
+              
+              {!isHistory && !isAdmin && (
+                <div className="absolute top-0.5 right-0.5 hidden group-hover:flex gap-0.5">
+                  <button onClick={() => handleEditOpen(entry)} className="p-0.5 rounded hover:bg-accent/20">
+                    <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                  </button>
+                  <button onClick={() => handleDelete(entry.id)} className="p-0.5 rounded hover:bg-destructive/20">
+                    <Trash2 className="h-2.5 w-2.5 text-destructive" />
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
 
   const renderScheduleMatrix = (
-    weekGroups: { weekNum: number; sectorRows: { sectorId: string; sectorName: string; byDay: Record<number, ScheduleEntry | undefined> }[] }[],
+    weekGroups: { weekNum: number; sectorRows: { sectorId: string; sectorName: string; byDay: Record<number, ScheduleEntry[]> }[] }[],
     isHistory: boolean
   ) => {
     if (weekGroups.length === 0) return (
@@ -378,31 +421,31 @@ export default function Schedule() {
                         {renderCell(row.byDay[day.key], isHistory, weekNum, row.sectorId, day.key)}
                       </td>
                     ))}
-                    {/* Nível 02 Semanal */}
+                    {/* Nível 02 Semanal - per sector */}
                     <td className="border border-border p-1.5 align-top text-center">
-                      {rIdx === 0 && row.byDay[WEEK_DAYS[0].key] ? (() => {
-                        const entry = row.byDay[WEEK_DAYS[0].key]!;
-                        const emp = employees.find(e => e.id === entry.employeeId);
-                        return (
-                          <div>
-                            <p className="text-[10px] font-bold">{emp?.name || 'N/A'}</p>
-                            <p className="text-[9px] text-muted-foreground">{emp?.minifabrica || ''}</p>
-                          </div>
-                        );
-                      })() : null}
+                      {row.byDay[10] && row.byDay[10].length > 0 ? renderCell(row.byDay[10], isHistory, weekNum, row.sectorId, 10) : (
+                        !isHistory && !isAdmin && (
+                          <button
+                            onClick={() => handleCreateOpen(weekNum, row.sectorId, 10)}
+                            className="text-[10px] text-blue-600 hover:underline"
+                          >
+                            Adicionar
+                          </button>
+                        )
+                      )}
                     </td>
-                    {/* Demais Níveis */}
+                    {/* Demais Níveis - per sector */}
                     <td className="border border-border p-1.5 align-top text-center">
-                      {rIdx === 0 && row.byDay[WEEK_DAYS[5]?.key] ? (() => {
-                        const entry = row.byDay[WEEK_DAYS[5].key]!;
-                        const emp = employees.find(e => e.id === entry.employeeId);
-                        return (
-                          <div>
-                            <p className="text-[10px] font-bold">{emp?.name || 'N/A'}</p>
-                            <p className="text-[9px] text-muted-foreground">{emp?.minifabrica || ''}</p>
-                          </div>
-                        );
-                      })() : null}
+                      {row.byDay[11] && row.byDay[11].length > 0 ? renderCell(row.byDay[11], isHistory, weekNum, row.sectorId, 11) : (
+                        !isHistory && !isAdmin && (
+                          <button
+                            onClick={() => handleCreateOpen(weekNum, row.sectorId, 11)}
+                            className="text-[10px] text-blue-600 hover:underline"
+                          >
+                            Adicionar
+                          </button>
+                        )
+                      )}
                     </td>
                   </tr>
                 ))
@@ -603,7 +646,7 @@ export default function Schedule() {
                   <TableBody>
                     {missedAnalysis.allMissed.map(entry => {
                       const emp = employees.find(e => e.id === entry.employeeId);
-                      const setor = sectors.find(s => s.id === (entry.sectorId || ''));
+                      const setor = sectors.find(s => normalizeText(s.id) === normalizeText(entry.sectorId || ''));
                       const ck = checklists.find(c => c.id === entry.checklistId);
                       return (
                         <TableRow key={entry.id}>
@@ -692,7 +735,11 @@ export default function Schedule() {
               <Label>Dia da Semana</Label>
               <Select value={String(editForm.dayOfWeek)} onValueChange={v => setEditForm(f => ({ ...f, dayOfWeek: Number(v) }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{WEEK_DAYS.map(d => <SelectItem key={d.key} value={String(d.key)}>{d.label}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  {WEEK_DAYS.map(d => <SelectItem key={d.key} value={String(d.key)}>{d.label}</SelectItem>)}
+                  {editForm.dayOfWeek === 10 && <SelectItem value="10">Nível 02 Semanal</SelectItem>}
+                  {editForm.dayOfWeek === 11 && <SelectItem value="11">Demais Níveis</SelectItem>}
+                </SelectContent>
               </Select>
             </div>
             <div>
@@ -702,13 +749,15 @@ export default function Schedule() {
                 <SelectContent>{employeesFiltered.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>Máquina</Label>
-              <Select value={editForm.machineId} onValueChange={v => setEditForm(f => ({ ...f, machineId: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{machinesFiltered.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
+            {editForm.dayOfWeek <= 6 && (
+              <div>
+                <Label>Máquina</Label>
+                <Select value={editForm.machineId} onValueChange={v => setEditForm(f => ({ ...f, machineId: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{machinesFiltered.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label>Checklist</Label>
               <Select value={editForm.checklistId} onValueChange={v => setEditForm(f => ({ ...f, checklistId: v }))}>

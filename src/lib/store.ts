@@ -90,14 +90,36 @@ function save<T>(key: string, data: T) {
   localStorage.setItem(key, JSON.stringify(data));
 }
 
+function normalizeText(value?: string | null): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeSector(value?: string | null): string {
+  return normalizeText(value);
+}
+
+function normalizeMinifabrica(value?: string | null): string {
+  return normalizeText(value);
+}
+
 // --- Store API ---
 export const store = {
   // Sectors (derived from machines for a given minifábrica)
   getSectors: (minifabricaId?: string): Sector[] => {
     const machines = store.getMachines();
-    const filtered = minifabricaId ? machines.filter(m => m.minifabrica === minifabricaId) : machines;
-    const sectorNames = [...new Set(filtered.map(m => m.sector).filter(Boolean))];
-    return sectorNames.map(name => ({ id: name, name }));
+    const filtered = minifabricaId
+      ? machines.filter(m => normalizeMinifabrica(m.minifabrica) === normalizeMinifabrica(minifabricaId))
+      : machines;
+
+    const sectorMap = new Map<string, string>();
+    filtered.forEach(m => {
+      const normalized = normalizeSector(m.sector);
+      if (normalized && !sectorMap.has(normalized)) {
+        sectorMap.set(normalized, String(m.sector || '').trim());
+      }
+    });
+
+    return Array.from(sectorMap.entries()).map(([id, name]) => ({ id, name }));
   },
 
   // Schedule Model
@@ -188,12 +210,17 @@ export const store = {
     const monthWeeks = weeks;
 
     let filteredMachines = machines;
-    if (minifabricaId) filteredMachines = filteredMachines.filter(m => m.minifabrica === minifabricaId);
-    if (sector) filteredMachines = filteredMachines.filter(m => m.sector === sector);
+    if (minifabricaId) {
+      filteredMachines = filteredMachines.filter(m => normalizeMinifabrica(m.minifabrica) === normalizeMinifabrica(minifabricaId));
+    }
+    if (sector) {
+      const normalizedSector = normalizeSector(sector);
+      filteredMachines = filteredMachines.filter(m => normalizeSector(m.sector) === normalizedSector);
+    }
 
     console.log('Filtered machines:', filteredMachines.length);
-    
-    const sectors = [...new Set(filteredMachines.map(m => m.sector).filter(Boolean))];
+
+    const sectors = [...new Set(filteredMachines.map(m => normalizeSector(m.sector)).filter(Boolean))];
     console.log('Sectors found:', sectors);
 
     if (sectors.length === 0) {
@@ -203,19 +230,28 @@ export const store = {
 
     monthWeeks.forEach((weekNumber, weekIdx) => {
       sectors.forEach(sectorId => {
-        const sectorMachines = filteredMachines.filter(m => m.sector === sectorId);
+        const sectorMachines = filteredMachines.filter(m => normalizeSector(m.sector) === sectorId);
+        const usedDays = new Set<number>();
+
         sectorMachines.forEach((machine, idx) => {
+          if (usedDays.size >= 5) return; // max 5 weekdays per sector
+
+          const candidateDay = (idx % 5) + 1;
+          if (usedDays.has(candidateDay)) return;
+
+          usedDays.add(candidateDay);
           const checklistIdx = (weekIdx + idx) % checklists.length;
+
           entries.push({
             id: generateId(),
             weekNumber,
-            dayOfWeek: (idx % 5) + 1,
+            dayOfWeek: candidateDay,
             month,
             year,
             employeeId: '',
             machineId: machine.id,
-            sectorId: sectorId,
-            minifabricaId: minifabricaId || machine.minifabrica || '',
+            sectorId,
+            minifabricaId: normalizeMinifabrica(minifabricaId || machine.minifabrica || ''),
             checklistId: checklists[checklistIdx].id,
             status: 'pending',
           });
@@ -224,9 +260,21 @@ export const store = {
     });
 
     console.log('Total entries created:', entries.length);
+
+    const uniqueMap = new Map<string, ScheduleEntry>();
+    entries.forEach(entry => {
+      const key = `${entry.weekNumber}-${entry.sectorId}-${entry.dayOfWeek}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, entry);
+      }
+    });
+
+    const uniqueEntries = Array.from(uniqueMap.values());
+    console.log('Total entries after dedupe:', uniqueEntries.length);
+
     const existing = store.getSchedule().filter(e => !(e.month === month && e.year === year));
-    store.saveSchedule([...existing, ...entries]);
-    return entries;
+    store.saveSchedule([...existing, ...uniqueEntries]);
+    return uniqueEntries;
   },
 
   addScheduleEntry: (data: Omit<ScheduleEntry, 'id'>): ScheduleEntry => {
