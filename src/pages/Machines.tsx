@@ -81,7 +81,7 @@ export default function Machines() {
 
   const machineHistory = useMemo(() => {
     if (!historyMachine) return [];
-    return audits.filter(a => a.machineId === historyMachine.id).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return audits.filter(a => (a as any).machine_id === historyMachine.id).sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime());
   }, [historyMachine, audits]);
 
   const resetForm = () => setForm({ name: '', code: '', sector: '', minifabrica: '', description: '' });
@@ -311,14 +311,15 @@ export default function Machines() {
           ) : (
             <div className="space-y-3">
               {machineHistory.map(audit => {
-                const emp = allUsers.find(e => e.id === audit.employeeId);
-                const ck = checklists.find(c => c.id === audit.checklistId);
+                const aAny = audit as any;
+                const emp = allUsers.find(e => e.id === aAny.employee_id);
+                const ck = checklists.find(c => c.id === aAny.checklist_id);
                 const statusColor = audit.status === 'conforme' ? 'bg-green-500/20 text-green-700' : audit.status === 'nao_conforme' ? 'bg-red-500/20 text-red-700' : 'bg-yellow-500/20 text-yellow-700';
                 const statusLabel = audit.status === 'conforme' ? 'Conforme' : audit.status === 'nao_conforme' ? 'Não Conforme' : 'Parcial';
                 return (
                   <div key={audit.id} className="flex items-center justify-between rounded-lg border p-3">
                     <div>
-                      <p className="text-sm font-medium">{new Date(audit.createdAt).toLocaleDateString('pt-BR')}</p>
+                      <p className="text-sm font-medium">{new Date((audit as any).created_at).toLocaleDateString('pt-BR')}</p>
                       <p className="text-xs text-muted-foreground">{emp?.name} · {ck?.name}</p>
                       {audit.observations && <p className="text-xs text-muted-foreground mt-1 italic">"{audit.observations}"</p>}
                     </div>

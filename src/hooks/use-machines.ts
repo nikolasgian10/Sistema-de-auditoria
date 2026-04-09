@@ -65,6 +65,17 @@ export function useDeleteMachine() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      const { data: linkedAudits, error: auditError } = await supabase
+        .from('audits')
+        .select('id')
+        .eq('machine_id', id)
+        .limit(1);
+
+      if (auditError) throw auditError;
+      if (linkedAudits && linkedAudits.length > 0) {
+        throw new Error('Não é possível excluir a máquina porque existem auditorias vinculadas a ela. Exclua ou atualize essas auditorias primeiro.');
+      }
+
       const { error } = await supabase.from('machines').delete().eq('id', id);
       if (error) throw error;
     },

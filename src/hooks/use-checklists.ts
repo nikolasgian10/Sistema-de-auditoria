@@ -114,6 +114,22 @@ export function useDeleteChecklist() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      const [{ data: linkedAudit }, { data: linkedScheduleEntry }, { data: linkedModel }] = await Promise.all([
+        supabase.from('audits').select('id').eq('checklist_id', id).limit(1),
+        supabase.from('schedule_entries').select('id').eq('checklist_id', id).limit(1),
+        supabase.from('schedule_model').select('id').eq('checklist_id', id).limit(1),
+      ]);
+
+      if (linkedAudit?.length) {
+        throw new Error('Não é possível excluir o checklist porque existem auditorias vinculadas a ele. Exclua ou atualize essas auditorias primeiro.');
+      }
+      if (linkedScheduleEntry?.length) {
+        throw new Error('Não é possível excluir o checklist porque ele está usado em cronogramas. Exclua primeiro os cronogramas relacionados.');
+      }
+      if (linkedModel?.length) {
+        throw new Error('Não é possível excluir o checklist porque ele está usado em modelos de cronograma. Remova esse modelo primeiro.');
+      }
+
       const { error } = await supabase.from('checklists').delete().eq('id', id);
       if (error) throw error;
     },

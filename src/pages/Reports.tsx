@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, Printer, FileText, Download } from 'lucide-react';
-import { store } from '@/lib/store';
+import { CalendarIcon, Printer, FileText, Download, Eye, CheckCircle2, XCircle, AlertCircle, Camera } from 'lucide-react';
 import { useMachines } from '@/hooks/use-machines';
 import { useChecklists } from '@/hooks/use-checklists';
 import { useAuth } from '@/lib/auth';
+import { useAudits } from '@/hooks/use-audits';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 
@@ -30,33 +31,38 @@ export default function Reports() {
   const [machineFilter, setMachineFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [detailAudit, setDetailAudit] = useState<any | null>(null);
 
-  const { getEffectiveMinifabrica } = useAuth();
+  const { getEffectiveMinifabrica, allUsers, currentUser } = useAuth();
   const effectiveSector = getEffectiveMinifabrica();
   
   const { data: allMachinesDb = [] } = useMachines();
   const { data: dbChecklists = [] } = useChecklists();
+  const { data: auditsData = [] } = useAudits({
+    userRole: currentUser?.role,
+    userId: currentUser?.id,
+    userMinifabrica: currentUser?.minifabrica,
+  });
   const allMachines = allMachinesDb;
   const machines = effectiveSector ? allMachines.filter(m => m.minifabrica === effectiveSector) : allMachines;
   const machineIds = new Set(machines.map(m => m.id));
   
-  const allAudits = store.getAudits();
-  const audits = effectiveSector ? allAudits.filter(a => machineIds.has(a.machineId)) : allAudits;
-  const { allUsers } = useAuth();
+  const audits = effectiveSector ? auditsData.filter(a => machineIds.has((a as any).machine_id)) : auditsData;
   const employees = effectiveSector ? allUsers.filter(e => e.minifabrica === effectiveSector) : allUsers;
   const checklists = dbChecklists.map(c => ({ id: c.id, name: c.name, category: c.category, items: c.items, createdAt: c.created_at }));
 
   const filtered = useMemo(() => {
     return audits.filter(a => {
-      if (statusFilter !== 'all' && a.status !== statusFilter) return false;
-      if (employeeFilter !== 'all' && a.employeeId !== employeeFilter) return false;
-      if (machineFilter !== 'all' && a.machineId !== machineFilter) return false;
+      const aAny = a as any;
+      if (statusFilter !== 'all' && aAny.status !== statusFilter) return false;
+      if (employeeFilter !== 'all' && aAny.employee_id !== employeeFilter) return false;
+      if (machineFilter !== 'all' && aAny.machine_id !== machineFilter) return false;
       if (dateFrom) {
-        const d = new Date(a.createdAt);
+        const d = new Date(aAny.created_at);
         if (d < dateFrom) return false;
       }
       if (dateTo) {
-        const d = new Date(a.createdAt);
+        const d = new Date(aAny.created_at);
         const end = new Date(dateTo);
         end.setHours(23, 59, 59, 999);
         if (d > end) return false;
@@ -71,22 +77,23 @@ export default function Reports() {
     const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
     const header = ['Data', 'Auditor', 'Máquina', 'Código Máq.', 'Setor', 'Checklist', 'Status', 'Observações', 'Respostas'];
     const rows = filtered.map(audit => {
-      const emp = employees.find(e => e.id === audit.employeeId);
-      const mach = machines.find(m => m.id === audit.machineId);
-      const ck = checklists.find(c => c.id === audit.checklistId);
-      const answers = audit.answers.map(ans => {
-        const item = ck?.items.find(x => x.id === ans.checklistItemId);
+      const aAny = audit as any;
+      const emp = employees.find(e => e.id === aAny.employee_id);
+      const mach = machines.find(m => m.id === aAny.machine_id);
+      const ck = checklists.find(c => c.id === aAny.checklist_id);
+      const answers = (aAny.audit_answers || []).map(ans => {
+        const item = ck?.items.find(x => x.id === ans.checklist_item_id);
         return `${item?.question || '?'}: ${ans.conformity === 'ok' ? 'OK' : ans.conformity === 'nok' ? 'NOK' : ans.answer}`;
       }).join(' | ');
       return [
-        new Date(audit.createdAt).toLocaleDateString('pt-BR'),
+        new Date(aAny.created_at).toLocaleDateString('pt-BR'),
         emp?.name || '',
         mach?.name || '',
         mach?.code || '',
         mach?.sector || '',
         ck?.name || '',
-        statusLabels[audit.status] || audit.status,
-        audit.observations || '',
+        statusLabels[aAny.status] || aAny.status,
+        aAny.observations || '',
         answers,
       ];
     });
@@ -225,16 +232,18 @@ export default function Reports() {
                   <TableHead>Checklist</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Observações</TableHead>
+                  <TableHead className="text-right no-print">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map(audit => {
-                  const emp = employees.find(e => e.id === audit.employeeId);
-                  const mach = machines.find(m => m.id === audit.machineId);
-                  const ck = checklists.find(c => c.id === audit.checklistId);
+                  const aAny = audit as any;
+                  const emp = employees.find(e => e.id === aAny.employee_id);
+                  const mach = machines.find(m => m.id === aAny.machine_id);
+                  const ck = checklists.find(c => c.id === aAny.checklist_id);
                   return (
                     <TableRow key={audit.id}>
-                      <TableCell>{new Date(audit.createdAt).toLocaleDateString('pt-BR')}</TableCell>
+                      <TableCell>{new Date((audit as any).created_at).toLocaleDateString('pt-BR')}</TableCell>
                       <TableCell className="font-medium">{emp?.name || 'N/A'}</TableCell>
                       <TableCell>{mach?.name || 'N/A'}</TableCell>
                       <TableCell>{ck?.name || 'N/A'}</TableCell>
@@ -246,6 +255,11 @@ export default function Reports() {
                       <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
                         {audit.observations || '—'}
                       </TableCell>
+                      <TableCell className="text-right no-print">
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setDetailAudit(audit)} title="Ver detalhes e fotos">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -255,16 +269,124 @@ export default function Reports() {
         </Card>
       )}
 
+      {/* Detail Modal */}
+      <Dialog open={!!detailAudit} onOpenChange={() => setDetailAudit(null)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {detailAudit && (() => {
+            const aAny = detailAudit as any;
+            const emp = employees.find(e => e.id === aAny.employee_id);
+            const mach = machines.find(m => m.id === aAny.machine_id);
+            const ck = checklists.find(c => c.id === aAny.checklist_id);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Detalhes da Auditoria</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  {/* Basic Info */}
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="font-medium text-muted-foreground">Data</p>
+                      <p className="font-semibold">{new Date(aAny.created_at).toLocaleDateString('pt-BR')}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">Status</p>
+                      <div className="mt-1">
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium inline-block ${statusColors[aAny.status]}`}>
+                          {statusLabels[aAny.status]}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">Auditor</p>
+                      <p className="font-semibold">{emp?.name || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">Máquina</p>
+                      <p className="font-semibold">{mach?.name || 'N/A'}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="font-medium text-muted-foreground">Checklist</p>
+                      <p className="font-semibold">{ck?.name || 'N/A'}</p>
+                    </div>
+                  </div>
+
+                  {/* Observations */}
+                  {aAny.observations && (
+                    <div className="rounded-lg bg-muted/50 p-3">
+                      <p className="text-sm font-medium mb-1">Observações</p>
+                      <p className="text-sm">{aAny.observations}</p>
+                    </div>
+                  )}
+
+                  {/* Answers */}
+                  <div>
+                    <p className="text-sm font-semibold mb-3">Respostas da Checklist</p>
+                    <div className="space-y-2">
+                      {((aAny.audit_answers || [])).map((ans: any, i: number) => {
+                        const item = ck?.items.find(x => x.id === ans.checklist_item_id);
+                        const conformityIcon = ans.conformity === 'ok' ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        ) : ans.conformity === 'nok' ? (
+                          <XCircle className="h-4 w-4 text-red-600" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 text-yellow-600" />
+                        );
+                        const conformityLabel = ans.conformity === 'ok' ? 'OK' : ans.conformity === 'nok' ? 'NOK' : 'N/A';
+                        return (
+                          <div key={i} className="flex items-start gap-3 rounded-lg border p-3 bg-card">
+                            <div className="mt-1">{conformityIcon}</div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{item?.question || 'Pergunta desconhecida'}</p>
+                              <p className="text-xs text-muted-foreground mt-1">Resposta: <span className="font-semibold">{conformityLabel}</span></p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Photos */}
+                  {((aAny.audit_attachments || [])).length > 0 && (
+                    <div>
+                      <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        <Camera className="h-4 w-4" />
+                        Fotos ({aAny.audit_attachments.length})
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {(aAny.audit_attachments || []).map((att: any, i: number) => (
+                          <div key={i} className="rounded-lg overflow-hidden border bg-muted/50 flex items-center justify-center aspect-square">
+                            <img
+                              src={att.file_path}
+                              alt={`Foto ${i + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23f5f5f5%22 width=%22200%22 height=%22200%22/%3E%3C/svg%3E';
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       {/* Detail cards for printing */}
       <div className="print-only space-y-4">
         {filtered.map(audit => {
-          const emp = employees.find(e => e.id === audit.employeeId);
-          const mach = machines.find(m => m.id === audit.machineId);
-          const ck = checklists.find(c => c.id === audit.checklistId);
+          const aAny = audit as any;
+          const emp = employees.find(e => e.id === aAny.employee_id);
+          const mach = machines.find(m => m.id === aAny.machine_id);
+          const ck = checklists.find(c => c.id === aAny.checklist_id);
           return (
             <Card key={audit.id}>
               <CardHeader>
-                <CardTitle className="text-base">Auditoria - {new Date(audit.createdAt).toLocaleDateString('pt-BR')}</CardTitle>
+                <CardTitle className="text-base">Auditoria - {new Date((audit as any).created_at).toLocaleDateString('pt-BR')}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <p><strong>Auditor:</strong> {emp?.name}</p>
@@ -273,7 +395,7 @@ export default function Reports() {
                 <p><strong>Observações:</strong> {audit.observations || 'Nenhuma'}</p>
                 <div className="mt-2">
                   <strong>Respostas:</strong>
-                  {audit.answers.map((ans, i) => {
+                  {((audit as any).audit_answers || []).map((ans, i) => {
                     const item = ck?.items.find(x => x.id === ans.checklistItemId);
                     return (
                       <p key={i} className="ml-2">{item?.question}: {ans.conformity === 'ok' ? '✅ OK' : ans.conformity === 'nok' ? '❌ NOK' : ans.answer}</p>

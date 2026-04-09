@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
-import { store, ScheduleEntry, AuditRecord, getISOWeekNumber, getWeeksOfMonthISO } from '@/lib/store';
+import { useState, useMemo, useEffect } from 'react';
 import { useMachines } from '@/hooks/use-machines';
 import { useChecklists } from '@/hooks/use-checklists';
+import { useScheduleEntries } from '@/hooks/use-schedule';
+import { useAudits, type AuditWithDetails } from '@/hooks/use-audits';
 import { useAuth } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,36 +22,87 @@ export default function MyAudits() {
   const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth()));
   const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
   const [selectedWeek, setSelectedWeek] = useState<string>('all');
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
-  const [detailAudit, setDetailAudit] = useState<AuditRecord | null>(null);
-  const { allUsers } = useAuth();
-  const employees = allUsers;
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [detailAudit, setDetailAudit] = useState<AuditWithDetails | null>(null);
+  const { allUsers, currentUser } = useAuth();
+
+  // Filter employees based on user role
+  const employees = useMemo(() => {
+    if (!currentUser) return [];
+    
+    if (currentUser.role === 'administrativo') {
+      // Administrativo can only see themselves
+      return allUsers.filter(u => u.id === currentUser.id);
+    } else if (currentUser.role === 'diretor') {
+      // Diretor can see employees from their minifabrica
+      return allUsers.filter(u => u.minifabrica === currentUser.minifabrica);
+    }
+    
+    // Gestor can see all users
+    return allUsers;
+  }, [allUsers, currentUser]);
+
+  // Auto-set selectedEmployee based on role
+  useEffect(() => {
+    if (!selectedEmployee && currentUser?.id) {
+      if (currentUser.role === 'administrativo') {
+        // Administrativo always sees only themselves
+        setSelectedEmployee(currentUser.id);
+      } else {
+        // Diretor and Gestor default to 'all'
+        setSelectedEmployee('all');
+      }
+    }
+  }, [currentUser?.id, currentUser?.role, selectedEmployee]);
 
   const { data: dbMachines = [] } = useMachines();
   const { data: dbChecklists = [] } = useChecklists();
+  const { data: schedule = [] } = useScheduleEntries({ month: Number(selectedMonth), year: Number(selectedYear) });
+  const { data: audits = [] } = useAudits({
+    userRole: currentUser?.role,
+    userId: currentUser?.id,
+    userMinifabrica: currentUser?.minifabrica,
+  });
   const machines = dbMachines;
   const checklists = dbChecklists.map(c => ({ id: c.id, name: c.name, category: c.category, items: c.items.map(it => ({ id: it.id, question: it.question, explanation: it.explanation, type: it.type as 'ok_nok' | 'text' | 'number' })), createdAt: c.created_at }));
-  const schedule = store.getSchedule();
-  const audits = store.getAudits();
 
   const month = Number(selectedMonth);
   const year = Number(selectedYear);
 
-  const weeksOfMonth = useMemo(() => getWeeksOfMonthISO(month, year), [month, year]);
+  const getWeeksOfMonth = (m: number, y: number): number[] => {
+    const weeks: number[] = [];
+    const d = new Date(y, m, 1);
+    const lastDay = new Date(y, m + 1, 0);
+    const getISOWeekNumber = (date: Date): number => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    };
+    while (d <= lastDay) {
+      const w = getISOWeekNumber(d);
+      if (!weeks.includes(w)) weeks.push(w);
+      d.setDate(d.getDate() + 1);
+    }
+    return weeks.sort((a, b) => a - b);
+  };
+
+  const weeksOfMonth = useMemo(() => getWeeksOfMonth(month, year), [month, year]);
 
   // Filter schedule entries for the selected period
   const filteredSchedule = useMemo(() => {
-    let entries = schedule.filter(s => s.month === month && s.year === year);
-    if (selectedWeek !== 'all') entries = entries.filter(s => s.weekNumber === Number(selectedWeek));
-    if (selectedEmployee !== 'all') entries = entries.filter(s => s.employeeId === selectedEmployee);
+    let entries = schedule;
+    if (selectedWeek !== 'all') entries = entries.filter(s => s.week_number === Number(selectedWeek));
+    if (selectedEmployee !== 'all') entries = entries.filter(s => s.employee_id === selectedEmployee);
     return entries;
-  }, [schedule, month, year, selectedWeek, selectedEmployee]);
+  }, [schedule, selectedWeek, selectedEmployee]);
 
   const pendingEntries = useMemo(() => filteredSchedule.filter(s => s.status === 'pending'), [filteredSchedule]);
   const completedEntries = useMemo(() => filteredSchedule.filter(s => s.status === 'completed'), [filteredSchedule]);
   const missedEntries = useMemo(() => filteredSchedule.filter(s => s.status === 'missed'), [filteredSchedule]);
 
-  const getAuditForEntry = (entryId: string) => audits.find(a => a.scheduleEntryId === entryId);
+  const getAuditForEntry = (entryId: string) => audits.find(a => a.schedule_entry_id === entryId);
 
   const statusBadge = (status: string) => {
     if (status === 'conforme') return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">Conforme</Badge>;
@@ -59,10 +111,10 @@ export default function MyAudits() {
     return <Badge variant="secondary">{status}</Badge>;
   };
 
-  const renderEntryRow = (entry: ScheduleEntry, showActions: boolean) => {
-    const emp = employees.find(e => e.id === entry.employeeId);
-    const mach = machines.find(m => m.id === entry.machineId);
-    const ck = checklists.find(c => c.id === entry.checklistId);
+  const renderEntryRow = (entry: any, showActions: boolean) => {
+    const emp = employees.find(e => e.id === entry.employee_id);
+    const mach = machines.find(m => m.id === entry.machine_id);
+    const ck = checklists.find(c => c.id === entry.checklist_id);
     const audit = getAuditForEntry(entry.id);
     const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -71,8 +123,8 @@ export default function MyAudits() {
         <TableCell className="text-xs font-medium">{emp?.name || 'N/A'}</TableCell>
         <TableCell className="text-xs">{mach?.name || 'N/A'}</TableCell>
         <TableCell className="text-xs">{ck?.name || 'N/A'}</TableCell>
-        <TableCell className="text-xs text-center">Sem {entry.weekNumber}</TableCell>
-        <TableCell className="text-xs text-center">{days[entry.dayOfWeek] || '–'}</TableCell>
+        <TableCell className="text-xs text-center">Sem {entry.week_number}</TableCell>
+        <TableCell className="text-xs text-center">{days[entry.day_of_week] || '–'}</TableCell>
         <TableCell className="text-xs text-center">
           {entry.status === 'pending' && <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pendente</Badge>}
           {entry.status === 'completed' && audit && statusBadge(audit.status)}
@@ -80,7 +132,7 @@ export default function MyAudits() {
         </TableCell>
         <TableCell className="text-xs text-center">
           {showActions && entry.status === 'pending' && (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/mobile-audit')}>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/mobile-audit', { state: { scheduleEntryId: entry.id, sector: (entry as any).sector, minifabrica: (entry as any).minifabrica } })}>
               <ClipboardCheck className="h-3 w-3 mr-1" />Fazer
             </Button>
           )}
@@ -103,10 +155,10 @@ export default function MyAudits() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
-        <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+        <Select value={selectedEmployee} onValueChange={setSelectedEmployee} disabled={currentUser?.role === 'administrativo'}>
           <SelectTrigger className="w-48"><SelectValue placeholder="Auditor" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todos auditores</SelectItem>
+            {currentUser?.role !== 'administrativo' && <SelectItem value="all">Todos auditores</SelectItem>}
             {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -198,9 +250,9 @@ export default function MyAudits() {
       <Dialog open={!!detailAudit} onOpenChange={() => setDetailAudit(null)}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           {detailAudit && (() => {
-            const emp = employees.find(e => e.id === detailAudit.employeeId);
-            const mach = machines.find(m => m.id === detailAudit.machineId);
-            const ck = checklists.find(c => c.id === detailAudit.checklistId);
+            const emp = employees.find(e => e.id === detailAudit.employee_id);
+            const mach = machines.find(m => m.id === detailAudit.machine_id);
+            const ck = checklists.find(c => c.id === detailAudit.checklist_id);
             return (
               <>
                 <DialogHeader>
@@ -214,17 +266,17 @@ export default function MyAudits() {
                     <div><span className="text-muted-foreground">Auditor:</span> <strong>{emp?.name}</strong></div>
                     <div><span className="text-muted-foreground">Máquina:</span> <strong>{mach?.name}</strong></div>
                     <div><span className="text-muted-foreground">Checklist:</span> <strong>{ck?.name}</strong></div>
-                    <div><span className="text-muted-foreground">Data:</span> <strong>{new Date(detailAudit.createdAt).toLocaleDateString('pt-BR')}</strong></div>
+                    <div><span className="text-muted-foreground">Data:</span> <strong>{new Date(detailAudit.created_at).toLocaleDateString('pt-BR')}</strong></div>
                   </div>
 
                   <div>
                     <h4 className="font-semibold text-sm mb-2">Respostas</h4>
                     <div className="space-y-2">
-                      {detailAudit.answers.map((ans, i) => {
-                        const item = ck?.items.find(it => it.id === ans.checklistItemId);
+                      {((detailAudit as any).audit_answers || []).map((ans, i) => {
+                        const item = ck?.items.find(it => it.id === ans.checklist_item_id);
                         return (
                           <div key={i} className="flex items-center justify-between rounded-md border p-2">
-                            <span className="text-sm flex-1">{item?.question || ans.checklistItemId}</span>
+                            <span className="text-sm flex-1">{item?.question || ans.checklist_item_id}</span>
                             {ans.conformity === 'ok' ? (
                               <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 ml-2"><CheckCircle2 className="h-3 w-3 mr-1" />OK</Badge>
                             ) : ans.conformity === 'nok' ? (
@@ -245,11 +297,13 @@ export default function MyAudits() {
                     </div>
                   )}
 
-                  {detailAudit.photos.length > 0 && (
+                  {detailAudit.attachments.length > 0 && (
                     <div>
                       <h4 className="font-semibold text-sm mb-1">Fotos</h4>
                       <div className="flex gap-2 flex-wrap">
-                        {detailAudit.photos.map((p, i) => <img key={i} src={p} alt={`Foto ${i + 1}`} className="h-20 w-20 rounded-lg object-cover border" />)}
+                        {detailAudit.attachments.map((att, i) => (
+                          <img key={i} src={att.file_path} alt={`Foto ${i + 1}`} className="h-20 w-20 rounded-lg object-cover border" />
+                        ))}
                       </div>
                     </div>
                   )}

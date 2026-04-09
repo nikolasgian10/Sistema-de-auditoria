@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { store, AuditAnswer } from '@/lib/store';
+import { useLocation } from 'react-router-dom';
+import { useAuth } from '@/lib/auth';
 import { useMachines, Machine } from '@/hooks/use-machines';
 import { useChecklists, Checklist } from '@/hooks/use-checklists';
+import { useScheduleEntries } from '@/hooks/use-schedule';
+import { useAddAudit } from '@/hooks/use-audits';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,18 +14,27 @@ import { Label } from '@/components/ui/label';
 import { QrCode, Camera, CheckCircle2, XCircle, Send, ArrowLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Stage = 'scan' | 'selectChecklist' | 'checklist' | 'done';
+type Stage = 'scan' | 'selectSchedule' | 'selectChecklist' | 'checklist' | 'done';
 
-interface LPAAnswer extends AuditAnswer {
+interface LPAAnswer {
+  checklistItemId: string;
+  answer: string;
+  conformity: 'ok' | 'nok' | 'na';
   actionImmediate: boolean;
   escalate: boolean;
   responsible: string;
 }
 
 export default function MobileAudit() {
+  const { currentUser, authUser } = useAuth();
+  const location = useLocation();
   const [stage, setStage] = useState<Stage>('scan');
+  const [sector, setSector] = useState<string | null>(null);
+  const [minifabrica, setMinifabrica] = useState<string | null>(null);
   const [machine, setMachine] = useState<Machine | null>(null);
   const [checklist, setChecklist] = useState<Checklist | null>(null);
+  const [scheduleEntryId, setScheduleEntryId] = useState<string | null>(null);
+  const [schedulesForSector, setSchedulesForSector] = useState<any[]>([]);
   const [answers, setAnswers] = useState<LPAAnswer[]>([]);
   const [observations, setObservations] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
@@ -37,7 +49,19 @@ export default function MobileAudit() {
 
   const { data: allMachines = [] } = useMachines();
   const { data: allChecklists = [] } = useChecklists();
-  const scheduleEntries = store.getSchedule().filter(s => s.status === 'pending');
+  const { data: scheduleEntries = [] } = useScheduleEntries({ status: 'pending' });
+  const addAuditMutation = useAddAudit();
+
+  // Se vindo de MyAudits, recebe setor e scheduleEntryId
+  useEffect(() => {
+    const state = location.state as any;
+    if (state?.sector && state?.scheduleEntryId) {
+      setSector(state.sector);
+      setMinifabrica(state.minifabrica);
+      setScheduleEntryId(state.scheduleEntryId);
+      setStage('scan');
+    }
+  }, [location.state]);
 
   const stopScanner = async () => {
     try { const scanner = html5QrRef.current; if (scanner && scanner.isScanning) await scanner.stop(); } catch {}
@@ -67,20 +91,44 @@ export default function MobileAudit() {
   const loadMachine = (machineId: string) => {
     const m = allMachines.find(x => x.id === machineId);
     if (!m) { toast.error('Máquina não encontrada'); return; }
+    
+    // Se tem setor pré-definido (vindo de MyAudits), valida se máquina é do setor
+    if (sector && m.sector !== sector) {
+      toast.error(`Máquina deve ser do setor ${sector}`);
+      return;
+    }
+    
     setMachine(m);
-    const entry = scheduleEntries.find(s => s.machineId === machineId);
-    if (entry) {
-      const ck = allChecklists.find(c => c.id === entry.checklistId);
-      if (ck) { setChecklist(ck); setAnswers(ck.items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok', actionImmediate: false, escalate: false, responsible: '' }))); setStage('checklist'); return; }
+    setScheduleEntryId(null);
+    
+    // Busca auditorias programadas para o setor (ou máquina se não tem setor)
+    const sectorToSearch = sector || m.sector;
+    const schedulesForThisSector = scheduleEntries.filter(s => (s as any).sector === sectorToSearch);
+    
+    if (schedulesForThisSector.length > 0) {
+      setSchedulesForSector(schedulesForThisSector);
+      setStage('selectSchedule');
+    } else {
+      // Sem auditorias agendadas, vai direto pra escolher checklist
+      if (allChecklists.length > 0) {
+        setStage('selectChecklist');
+      } else {
+        toast.error('Nenhum checklist disponível');
+      }
     }
-    // Se não tem auditoria agendada e tem checklists, mostra seletor
-    if (allChecklists.length > 0) { 
-      setStage('selectChecklist');
-    }
-    else toast.error('Nenhum checklist disponível');
   };
 
   const updateAnswer = (idx: number, field: string, value: any) => setAnswers(answers.map((a, i) => i === idx ? { ...a, [field]: value } : a));
+
+  const selectChecklistAndPrepare = (checklistId: string, schedId?: string) => {
+    const ck = allChecklists.find(c => c.id === checklistId);
+    if (ck) {
+      setChecklist(ck);
+      if (schedId) setScheduleEntryId(schedId);
+      setAnswers(ck.items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok' as const, actionImmediate: false, escalate: false, responsible: '' })));
+      setStage('checklist');
+    }
+  };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files; if (!files) return;
@@ -88,17 +136,51 @@ export default function MobileAudit() {
   };
 
   const handleSubmit = () => {
-    if (!machine || !checklist) return;
-    const entry = scheduleEntries.find(s => s.machineId === machine.id);
-    const allOk = answers.every(a => a.conformity === 'ok');
+    if (!machine || !checklist || !authUser) return;
+    
+    // Calculate status with priority: NOK > NA > OK
     const anyNok = answers.some(a => a.conformity === 'nok');
-    store.addAudit({ scheduleEntryId: entry?.id || '', employeeId: entry?.employeeId || 'emp1', machineId: machine.id, checklistId: checklist.id, date: new Date().toISOString(), answers: answers.map(a => ({ checklistItemId: a.checklistItemId, answer: a.answer, conformity: a.conformity })), observations, photos, status: allOk ? 'conforme' : anyNok ? 'nao_conforme' : 'parcial' });
-    toast.success('Auditoria registrada com sucesso!'); setStage('done');
+    const anyNA = answers.some(a => a.conformity === 'na');
+    const allOk = answers.every(a => a.conformity === 'ok');
+    
+    let finalStatus: 'conforme' | 'nao_conforme' | 'parcial';
+    if (anyNok) {
+      finalStatus = 'nao_conforme';
+    } else if (allOk) {
+      finalStatus = 'conforme';
+    } else {
+      finalStatus = 'parcial';
+    }
+    
+    addAuditMutation.mutate({
+      schedule_entry_id: scheduleEntryId,
+      employee_id: authUser.id,
+      machine_id: machine.id,
+      checklist_id: checklist.id,
+      minifabrica: machine.minifabrica || minifabrica || '',
+      date: new Date().toISOString().split('T')[0],
+      observations,
+      answers: answers.map(a => ({
+        checklist_item_id: a.checklistItemId,
+        answer: a.answer,
+        conformity: a.conformity,
+      })),
+      photos,
+      status: finalStatus,
+    });
+    
+    setTimeout(() => {
+      if (!addAuditMutation.isPending) {
+        setStage('done');
+      }
+    }, 500);
   };
 
-  const reset = () => { setStage('scan'); setMachine(null); setChecklist(null); setAnswers([]); setObservations(''); setPhotos([]); setManualCode(''); setAuditorName(''); setTurno(''); setAuditadoRE(''); setAuditadoNome(''); };
+  const reset = () => { setStage('scan'); setSector(null); setMachine(null); setChecklist(null); setScheduleEntryId(null); setSchedulesForSector([]); setAnswers([]); setObservations(''); setPhotos([]); setManualCode(''); setAuditorName(''); setTurno(''); setAuditadoRE(''); setAuditadoNome(''); };
 
-  const recentMachines = allMachines.slice(0, 5);
+  const recentMachines = sector 
+    ? allMachines.filter(m => m.sector === sector).slice(0, 5)
+    : allMachines.slice(0, 5);
 
   const statusColor = (conformity: string) => {
     if (conformity === 'ok') return { bg: '#16a34a', text: 'white', label: 'A' };
@@ -106,6 +188,45 @@ export default function MobileAudit() {
     if (conformity === 'na') return { bg: '#a3a3a3', text: 'white', label: 'NA' };
     return { bg: '#e5e5e5', text: '#888', label: '–' };
   };
+
+  if (stage === 'selectSchedule' && machine && schedulesForSector.length > 0) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6">
+          <div>
+            <Button variant="ghost" size="sm" onClick={() => { setMachine(null); setSchedulesForSector([]); setStage('scan'); }} className="mb-4"><ArrowLeft className="mr-2 h-4 w-4" />Voltar</Button>
+            <h2 className="text-2xl font-bold mb-2">Qual auditoria deseja fazer?</h2>
+            <p className="text-muted-foreground mb-4">Máquina: <strong>{machine.name}</strong> ({machine.code})</p>
+          </div>
+          <div className="space-y-3">
+            {schedulesForSector.map((sched: any) => {
+              const ck = allChecklists.find(c => c.id === sched.checklist_id);
+              return (
+                <Button
+                  key={sched.id}
+                  onClick={() => selectChecklistAndPrepare(sched.checklist_id, sched.id)}
+                  variant="outline"
+                  className="w-full justify-start text-left"
+                >
+                  <div className="flex flex-col gap-1">
+                    <span className="font-semibold">{ck?.name}</span>
+                    <span className="text-xs text-muted-foreground">Semana {sched.week_number} · {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][sched.day_of_week]}</span>
+                  </div>
+                </Button>
+              );
+            })}
+            <Button
+              onClick={() => selectChecklistAndPrepare(allChecklists[0]?.id || '')}
+              variant="secondary"
+              className="w-full"
+            >
+              Fazer auditoria não programada
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (stage === 'selectChecklist' && machine) {
     return (
@@ -118,14 +239,7 @@ export default function MobileAudit() {
           </div>
           <div className="space-y-3">
             <Label>Checklist</Label>
-            <Select onValueChange={(checklistId) => {
-              const ck = allChecklists.find(c => c.id === checklistId);
-              if (ck) {
-                setChecklist(ck);
-                setAnswers(ck.items.map(item => ({ checklistItemId: item.id, answer: '', conformity: 'ok', actionImmediate: false, escalate: false, responsible: '' })));
-                setStage('checklist');
-              }
-            }}>
+            <Select onValueChange={(checklistId) => selectChecklistAndPrepare(checklistId)}>
               <SelectTrigger>
                 <SelectValue placeholder="Escolha um checklist" />
               </SelectTrigger>
@@ -347,12 +461,19 @@ export default function MobileAudit() {
           <QrCode className="h-8 w-8 text-primary" />
         </div>
         <h1 className="text-2xl font-bold text-primary">LPA Mobile</h1>
-        <p className="text-sm text-muted-foreground">Modo Auditor</p>
+        {sector ? (
+          <div>
+            <p className="text-sm text-muted-foreground">Setor: <strong>{sector}</strong></p>
+            <p className="text-xs text-muted-foreground">Escaneie uma máquina do setor</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Modo Auditor</p>
+        )}
       </div>
 
       <Card className="w-full max-w-md shadow-lg">
         <CardContent className="pt-6 space-y-5">
-          <h2 className="text-lg font-bold text-center">Escanear Ativo</h2>
+          <h2 className="text-lg font-bold text-center">{sector ? `Máquinas do Setor: ${sector}` : 'Escanear Ativo'}</h2>
           <div className="space-y-3">
             <Input placeholder="Digite o código (ex: CFB-001)" value={manualCode} onChange={e => setManualCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleManualEntry()} className="h-12 text-center" />
             <Button className="w-full h-12 text-base" onClick={handleManualEntry}><Search className="mr-2 h-5 w-5" />Buscar Ativo</Button>
@@ -373,7 +494,7 @@ export default function MobileAudit() {
 
       {recentMachines.length > 0 && (
         <div className="w-full max-w-md mt-6 space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Acesso Rápido</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{sector ? 'Máquinas do Setor' : 'Acesso Rápido'}</p>
           <div className="space-y-2">
             {recentMachines.map(m => (
               <button key={m.id} onClick={() => loadMachine(m.id)}

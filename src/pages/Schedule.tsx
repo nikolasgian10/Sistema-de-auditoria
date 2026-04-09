@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { store, ScheduleEntry, ScheduleModelEntry, AuditRecord, getWeeksOfMonthISO } from '@/lib/store';
 import { useMachines } from '@/hooks/use-machines';
 import { useChecklists } from '@/hooks/use-checklists';
+import { useScheduleEntries, useAddBulkScheduleEntries, useDeleteScheduleEntry, useUpdateScheduleEntry, useScheduleModels, useAddScheduleModel } from '@/hooks/use-schedule';
+import { useAudits } from '@/hooks/use-audits';
 import { useAuth } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Wand2, Printer, Pencil, Trash2, Save, History, AlertTriangle, UserX, Cpu } from 'lucide-react';
@@ -26,20 +28,42 @@ const WEEK_DAYS = [
 
 const normalizeText = (value?: string | null): string => String(value || '').trim().toLowerCase();
 
-function getStatusColor(entry: ScheduleEntry, audits: AuditRecord[]): string {
+function getWeeksOfMonthISO(month: number, year: number, allowFiveWeeks: boolean = false): number[] {
+  const weeks: number[] = [];
+  const d = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const getISOWeekNumber = (date: Date): number => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+  while (d <= lastDay) {
+    const w = getISOWeekNumber(d);
+    if (!weeks.includes(w)) weeks.push(w);
+    d.setDate(d.getDate() + 1);
+  }
+  
+  // Limit to 4 weeks by default, allow 5 if explicitly requested
+  const sorted = weeks.sort((a, b) => a - b);
+  return allowFiveWeeks ? sorted : sorted.slice(0, 4);
+}
+
+function getStatusColor(entry: any, audits: any[]): string {
   if (entry.status === 'missed') return 'bg-red-500/20 border-red-500/40 text-red-700 dark:text-red-400';
   if (entry.status === 'pending') return 'bg-muted/30 border-border';
-  const audit = audits.find(a => a.scheduleEntryId === entry.id);
+  const audit = audits.find(a => a.schedule_entry_id === entry.id);
   if (!audit) return 'bg-green-500/20 border-green-500/40 text-green-700 dark:text-green-400';
   if (audit.status === 'conforme') return 'bg-green-500/20 border-green-500/40 text-green-700 dark:text-green-400';
   if (audit.status === 'nao_conforme') return 'bg-yellow-500/20 border-yellow-500/40 text-yellow-700 dark:text-yellow-400';
   return 'bg-yellow-500/20 border-yellow-500/40 text-yellow-700 dark:text-yellow-400';
 }
 
-function getStatusLabel(entry: ScheduleEntry, audits: AuditRecord[]): string {
+function getStatusLabel(entry: any, audits: any[]): string {
   if (entry.status === 'missed') return 'Não realizada';
   if (entry.status === 'pending') return 'Pendente';
-  const audit = audits.find(a => a.scheduleEntryId === entry.id);
+  const audit = audits.find(a => a.schedule_entry_id === entry.id);
   if (!audit) return 'Realizada';
   if (audit.status === 'conforme') return 'Conforme';
   if (audit.status === 'nao_conforme') return 'Não conforme';
@@ -54,7 +78,7 @@ function getChecklistShortName(fullName: string): string {
 
 export default function Schedule() {
   const now = new Date();
-  const { userType, getEffectiveMinifabrica } = useAuth();
+  const { userType, getEffectiveMinifabrica, currentUser } = useAuth();
   const effectiveSector = getEffectiveMinifabrica();
   const sectorFilter = userType === 'diretor' ? effectiveSector : null;
   const isAdmin = userType === 'administrativo';
@@ -63,18 +87,75 @@ export default function Schedule() {
   const [year, setYear] = useState(now.getFullYear());
   const [histMonth, setHistMonth] = useState(now.getMonth() === 0 ? 11 : now.getMonth() - 1);
   const [histYear, setHistYear] = useState(now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
-  const [schedule, setSchedule] = useState(store.getSchedule());
-  const [scheduleModel, setScheduleModel] = useState(store.getScheduleModel());
-  const [editEntry, setEditEntry] = useState<ScheduleEntry | null>(null);
-  const [editForm, setEditForm] = useState({ employeeId: '', machineId: '', checklistId: '', dayOfWeek: 1 });
+  const [editEntry, setEditEntry] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ employee_id: '', checklist_id: '', day_of_week: 1 });
+  const [schedule, setSchedule] = useState<any[]>([]);
+  const [scheduleModel, setScheduleModel] = useState<any[]>([]);
+  const [allowFiveWeeks, setAllowFiveWeeks] = useState(false);
 
   const { allUsers } = useAuth();
   const employees = allUsers;
   const { data: dbMachines = [] } = useMachines();
   const { data: dbChecklists = [] } = useChecklists();
+  const { data: scheduleData = [] } = useScheduleEntries({ month, year });
+  const { data: audits = [] } = useAudits({
+    userRole: currentUser?.role,
+    userId: currentUser?.id,
+    userMinifabrica: currentUser?.minifabrica,
+  });
+  
+  // Carregar modelos do banco - SEM filtro por enquanto para diagnosticar
+  const { data: dbScheduleModels = [] } = useScheduleModels();
+  
+  useEffect(() => {
+    console.log('🔍 DEBUG Models:', { 
+      total: dbScheduleModels.length, 
+      userType, 
+      effectiveSector, 
+      models: dbScheduleModels.map(m => ({ sector: m.sector, weekIndex: m.week_index, dayOfWeek: m.day_of_week }))
+    });
+  }, [dbScheduleModels, userType, effectiveSector]);
+  
+  // Log toda vez que modelos mudam
+  useEffect(() => {
+    console.log('📊 Schedule.tsx - Modelos carregados:', {
+      total: dbScheduleModels.length,
+      modelos: dbScheduleModels.map(m => ({ id: m.id, sector: m.sector, week: m.week_index, day: m.day_of_week }))
+    });
+  }, [dbScheduleModels]);
+  
   const machines = dbMachines;
   const checklists = dbChecklists.map(c => ({ id: c.id, name: c.name, category: c.category, items: c.items.map(it => ({ id: it.id, question: it.question, explanation: it.explanation, type: it.type as 'ok_nok' | 'text' | 'number' })), createdAt: c.created_at }));
-  const audits = store.getAudits();
+  
+  const addBulkSchedule = useAddBulkScheduleEntries();
+  const deleteScheduleEntry = useDeleteScheduleEntry();
+  const updateScheduleEntry = useUpdateScheduleEntry();
+  const addScheduleModel = useAddScheduleModel();
+
+  // Sincronizar dados do Supabase com estado local
+  useEffect(() => {
+    if (scheduleData && scheduleData.length > 0) {
+      // Converter snake_case para camelCase
+      let transformed = (scheduleData as any[]).map(s => ({
+        ...s,
+        id: s.id,
+        weekNumber: s.week_number,
+        dayOfWeek: s.day_of_week,
+        employeeId: s.employee_id,
+        machineId: s.machine_id,
+        checklistId: s.checklist_id,
+        scheduledDate: s.scheduled_date,
+        completedDate: s.completed_date,
+      }));
+      
+      // Filtrar por minifábrica se o usuário é diretor ou administrativo
+      if (currentUser?.minifabrica && (currentUser?.role === 'diretor' || currentUser?.role === 'administrativo')) {
+        transformed = transformed.filter(s => (s as any).minifabrica === currentUser.minifabrica);
+      }
+      
+      setSchedule(transformed);
+    }
+  }, [scheduleData, currentUser?.minifabrica, currentUser?.role]);
 
   // Get sectors from actual machines (Supabase), not localStorage
   const sectors = useMemo(() => {
@@ -92,8 +173,8 @@ export default function Schedule() {
   const employeesFiltered = sectorFilter ? employees.filter(e => normalizeText(e.minifabrica) === normalizeText(sectorFilter)) : employees;
 
   const machineById = useMemo(() => new Map(machines.map(m => [m.id, m])), [machines]);
-  const getEntrySector = useCallback((entry: ScheduleEntry) => normalizeText(entry.sectorId || machineById.get(entry.machineId)?.sector || ''), [machineById]);
-  const getEntryMinifabrica = useCallback((entry: ScheduleEntry) => normalizeText(entry.minifabricaId || machineById.get(entry.machineId)?.minifabrica || ''), [machineById]);
+  const getEntrySector = useCallback((entry: any) => normalizeText(entry.sector || machineById.get(entry.machine_id)?.sector || ''), [machineById]);
+  const getEntryMinifabrica = useCallback((entry: any) => normalizeText(entry.minifabrica || machineById.get(entry.machine_id)?.minifabrica || ''), [machineById]);
 
   const modelForSector = useMemo(() => {
     if (!sectorFilter) return scheduleModel;
@@ -141,30 +222,267 @@ export default function Schedule() {
     return { total: allMissed.length, allMissed, auditorRanking, sectorRanking };
   }, [visibleSchedule, employees, sectors]);
 
+  const getDefaultMachineForSector = (sector?: string) => {
+    const normalizedSector = normalizeText(sector);
+    return machines.find(m => normalizeText(m.sector) === normalizedSector) || machines[0];
+  };
+
   const handleGenerate = () => {
-    if (isAdmin) { toast.error('Apenas diretores e gestores podem gerar o cronograma'); return; }
-    console.log('Debug:', { sectors: sectors.length, checklists: checklists.length, employees: employees.length, machines: machines.length });
-    if (sectors.length === 0) { toast.error('Nenhum setor encontrado. Cadastre máquinas com setores.'); return; }
-    if (checklists.length === 0) { toast.error('Nenhum checklist encontrado.'); return; }
-    if (employees.length === 0) { toast.error('Nenhum funcionário encontrado.'); return; }
-    const result = store.generateSchedule(month, year, sectorFilter || undefined, undefined, machines, dbChecklists, scheduleModel);
-    console.log('Schedule gerado:', result.length, 'entradas');
-    console.log('Entradas criadas:', result);
-    const allSchedule = store.getSchedule();
-    console.log('Schedule total após geração:', allSchedule.length, 'entradas');
-    console.log('Schedule data:', allSchedule);
-    setSchedule(allSchedule);
-    console.log('Month:', month, 'Year:', year, 'Sector Filter:', sectorFilter);
-    if (result.length === 0) {
-      toast.error('Nenhuma entrada gerada. Verifique os dados.');
-    } else {
-      toast.success(`Cronograma de ${MONTHS[month]} gerado com sucesso! (${result.length} entradas)`);
+    console.log('🔵 Gerando cronograma');
+    
+    if (isAdmin) { 
+      toast.error('❌ Apenas DIRETORES e GESTORES!'); 
+      return; 
     }
+    
+    if (dbMachines.length === 0) { 
+      toast.error('❌ Crie máquinas primeiro'); 
+      return; 
+    }
+    
+    if (dbChecklists.length === 0) { 
+      toast.error('❌ Crie checklists primeiro'); 
+      return; 
+    }
+
+    const existingForMonth = schedule.filter(s => s.month === month && s.year === year);
+    if (existingForMonth.length > 0) {
+      toast.error(`❌ Cronograma já existe. Clique "Limpar" primeiro.`);
+      return;
+    }
+
+    const weeks = getWeeksOfMonthISO(month, year, allowFiveWeeks);
+    let modelsToUse = dbScheduleModels;
+
+    // Se não houver modelos, criar um modelo PADRÃO automático
+    if (modelsToUse.length === 0) {
+      console.log('⚠️ Nenhum modelo encontrado. Criando modelo padrão...');
+      
+      const availableEmployees = employees.slice(0, weeks.length);
+      if (availableEmployees.length === 0) {
+        toast.error('❌ Nenhum funcionário disponível');
+        return;
+      }
+
+      // Modelo padrão: 1 funcionário por semana
+      modelsToUse = weeks.map((week, idx) => ({
+        id: `auto-${week}`,
+        week_index: idx + 1,
+        day_of_week: 1,
+        employee_id: availableEmployees[idx % availableEmployees.length].id,
+        sector: machinesFiltered[0]?.sector || '',
+        minifabrica: machinesFiltered[0]?.minifabrica || '',
+        checklist_id: '',
+      }));
+      
+      console.log('📋 Modelo padrão criado:', modelsToUse.length, 'funcionários');
+    }
+
+    const entriesToCreate: any[] = [];
+    const checklistAssignments = new Map<string, Set<string>>();
+
+    // Para cada modelo (funcionário + semana)
+    for (const model of modelsToUse) {
+      const weekIndex = model.week_index || 1;
+      if (weekIndex < 1 || weekIndex > weeks.length) continue;
+      
+      const weekNumber = weeks[weekIndex - 1];
+      const employee = employees.find(e => e.id === model.employee_id);
+      
+      if (!employee) {
+        console.warn(`⚠️ Funcionário não encontrado`);
+        continue;
+      }
+
+      // Agrupar máquinas por setor
+      const machinesBySector = new Map<string, any[]>();
+      machinesFiltered.forEach(m => {
+        const sectorKey = normalizeText(m.sector || '');
+        if (!machinesBySector.has(sectorKey)) {
+          machinesBySector.set(sectorKey, []);
+        }
+        machinesBySector.get(sectorKey)!.push(m);
+      });
+
+      // Para cada setor, criar 1 entrada por dia (segunda a sexta)
+      machinesBySector.forEach((machinesInSector, sectorKey) => {
+        for (let dayOfWeek = 1; dayOfWeek <= 5; dayOfWeek++) {
+          // Selecionar uma máquina do setor (rotacionando entre as máquinas)
+          const machineIdx = (dayOfWeek - 1) % machinesInSector.length;
+          const machine = machinesInSector[machineIdx];
+
+          // Checklists válidos para este setor
+          let validChecklists = dbChecklists.filter(c => 
+            !c.category || c.category === machine.sector || c.category === 'geral'
+          );
+          
+          if (validChecklists.length === 0) {
+            validChecklists = dbChecklists; // Usar todos se nenhum específico
+          }
+
+          // Rastrear checklist por (usuario + setor + semana + dia)
+          const trackKey = `${employee.id}|${machine.sector}|${weekNumber}|${dayOfWeek}`;
+          if (!checklistAssignments.has(trackKey)) {
+            checklistAssignments.set(trackKey, new Set());
+          }
+          const usedChecklists = checklistAssignments.get(trackKey)!;
+
+          // Encontrar checklist não usado este dia
+          const availableChecklists = validChecklists.filter(c => !usedChecklists.has(c.id));
+          if (availableChecklists.length === 0) {
+            usedChecklists.clear();
+          }
+
+          // Atribuir um checklist
+          const checklist = availableChecklists[0] || validChecklists[0];
+          if (checklist) {
+            usedChecklists.add(checklist.id);
+          }
+
+          entriesToCreate.push({
+            employee_id: employee.id,
+            machine_id: machine.id,
+            checklist_id: checklist.id,
+            week_number: weekNumber,
+            day_of_week: dayOfWeek,
+            month,
+            year,
+            status: 'pending',
+            minifabrica: machine.minifabrica || '',
+            sector: machine.sector || '',
+          });
+        }
+      });
+    }
+
+    if (entriesToCreate.length === 0) {
+      toast.error('❌ Nada pra gerar');
+      return;
+    }
+
+    console.log('✅ Enviando', entriesToCreate.length, 'entradas');
+    
+    addBulkSchedule.mutate(entriesToCreate, {
+      onSuccess: (newEntries) => {
+        if (newEntries && Array.isArray(newEntries)) {
+          const transformed = newEntries.map(s => ({
+            ...s,
+            weekNumber: s.week_number,
+            dayOfWeek: s.day_of_week,
+            employeeId: s.employee_id,
+            machineId: s.machine_id,
+            checklistId: s.checklist_id,
+            scheduledDate: s.scheduled_date,
+            completedDate: s.completed_date,
+          }));
+          setSchedule(prev => [...prev, ...transformed]);
+          toast.success(`✅ ${newEntries.length} auditorias geradas!`);
+        }
+      },
+      onError: (e) => toast.error(`Erro: ${e.message}`),
+    });
+  };
+
+  const handleClearSchedule = () => {
+    const toDelete = schedule.filter(s => s.month === month && s.year === year);
+    if (toDelete.length === 0) {
+      toast.error(`Nenhum cronograma encontrado em ${MONTHS[month]}`);
+      return;
+    }
+
+    if (!window.confirm(`Confirma deletar ${toDelete.length} entradas de ${MONTHS[month]}? Esta ação não pode ser desfeita!`)) {
+      return;
+    }
+
+    // Deletar todas as entradas do mês
+    let deletedCount = 0;
+    const idsToDelete = new Set(toDelete.map(e => e.id));
+    
+    toDelete.forEach((entry) => {
+      deleteScheduleEntry.mutate(entry.id, {
+        onSuccess: () => {
+          deletedCount++;
+          // Remover do estado local
+          setSchedule(prev => prev.filter(s => !idsToDelete.has(s.id)));
+          
+          if (deletedCount === toDelete.length) {
+            toast.success(`Cronograma de ${MONTHS[month]} foi limpo!`);
+          }
+        }
+      });
+    });
   };
 
   const handleSaveModel = () => {
-    store.saveScheduleModel(scheduleModel);
-    toast.success('Modelo de cronograma salvo!');
+    if (!sectorFilter) {
+      toast.error('❌ Selecione uma minifábrica');
+      return;
+    }
+
+    if (scheduleModel.length === 0) {
+      toast.error('❌ Nenhum modelo para salvar');
+      return;
+    }
+
+    // Contar quantos modelos serão salvos
+    const modelsToSave = scheduleModel.filter(m => normalizeText(m.sectorId) === normalizeText(sectorFilter));
+    
+    if (modelsToSave.length === 0) {
+      toast.error('❌ Nenhum modelo para esta minifábrica');
+      return;
+    }
+
+    // Mapear de sectorId normalizado para sector name
+    const sectorInfo = sectors.find(s => normalizeText(s.id) === normalizeText(sectorFilter));
+    const sectorName = sectorInfo?.name || sectorFilter;
+
+    // Criar lista de modelos para salvar
+    const modelsPayload = modelsToSave.map(model => ({
+      name: `Semana ${model.weekIndex}`,
+      description: `Auditoria - Semana ${model.weekIndex}`,
+      minifabrica: sectorFilter,
+      sector: sectorName,
+      week_index: model.weekIndex,
+      day_of_week: model.dayOfWeek,
+      employee_id: model.employeeId,
+      checklist_id: '', 
+    }));
+
+    let completedCount = 0;
+    let successCount = 0;
+
+    // Salvar cada modelo no banco
+    modelsPayload.forEach((modelData, index) => {
+      addScheduleModel.mutate(modelData as any, {
+        onSuccess: () => {
+          successCount++;
+          completedCount++;
+          
+          if (completedCount === modelsPayload.length) {
+            // Todos terminaram
+            if (successCount === modelsPayload.length) {
+              setScheduleModel([]); 
+              toast.success(`✅ ${successCount} modelo(s) salvo(s)!`);
+            } else {
+              toast.error(`❌ ${modelsPayload.length - successCount} erro(s) ao salvar`);
+            }
+          }
+        },
+        onError: (error) => {
+          completedCount++;
+          console.error(`Erro ao salvar modelo ${index}:`, error);
+          toast.error(`Erro ao salvar modelo ${index + 1}`);
+          
+          if (completedCount === modelsPayload.length) {
+            // Todos terminaram
+            if (successCount > 0) {
+              setScheduleModel([]); 
+              toast.success(`⚠️ ${successCount}/${modelsPayload.length} modelo(s) salvo(s)`);
+            }
+          }
+        }
+      });
+    });
   };
 
   const handleClearModel = () => {
@@ -188,108 +506,131 @@ export default function Schedule() {
     });
   };
 
-  const handleEditOpen = (entry: ScheduleEntry) => {
+  const handleEditOpen = (entry: any) => {
     if (isAdmin) return;
     setEditEntry(entry);
-    setEditForm({ employeeId: entry.employeeId, machineId: entry.machineId, checklistId: entry.checklistId, dayOfWeek: entry.dayOfWeek });
+    setEditForm({ employee_id: entry.employee_id, checklist_id: entry.checklist_id, day_of_week: entry.day_of_week });
   };
 
   const handleCreateOpen = (weekNumber: number, sectorId: string, dayOfWeek: number) => {
     if (isAdmin) return;
-    const newEntry: ScheduleEntry = {
+    const newEntry: any = {
       id: '',
-      weekNumber,
-      dayOfWeek,
+      week_number: weekNumber,
+      day_of_week: dayOfWeek,
       month,
       year,
-      employeeId: '',
-      machineId: '',
-      sectorId,
-      minifabricaId: sectorFilter || '',
-      checklistId: '',
+      employee_id: '',
+      machine_id: '',
+      sector: sectorId,
+      minifabrica: sectorFilter || '',
+      checklist_id: '',
       status: 'pending' as const,
     };
     setEditEntry(newEntry);
-    // For special levels (10, 11), no machine selection needed
-    const needsMachine = dayOfWeek <= 6;
-    setEditForm({ employeeId: '', machineId: needsMachine ? '' : 'N/A', checklistId: '', dayOfWeek });
+    setEditForm({ employee_id: '', checklist_id: '', day_of_week: dayOfWeek });
   };
 
   const handleEditSave = () => {
     if (!editEntry) return;
-    const needsMachine = editForm.dayOfWeek <= 6;
-    if (needsMachine && !editForm.machineId) {
-      toast.error('Selecione uma máquina para esta auditoria');
-      return;
-    }
-    if (!editForm.employeeId) {
+    console.log('💾 handleEditSave - Salvando:', { editEntry: editEntry.id, editForm });
+    
+    if (!editForm.employee_id) {
       toast.error('Selecione um funcionário');
       return;
     }
-    if (!editForm.checklistId) {
+    if (!editForm.checklist_id) {
       toast.error('Selecione um checklist');
       return;
     }
     if (!editEntry.id) {
-      store.addScheduleEntry({
-        weekNumber: editEntry.weekNumber,
-        dayOfWeek: editEntry.dayOfWeek,
+      console.log('📝 Criando nova entrada');
+      const defaultMachine = getDefaultMachineForSector(editEntry.sector || sectorFilter || '');
+      if (!defaultMachine) {
+        toast.error('Nenhuma máquina disponível');
+        return;
+      }
+
+      // Criar novo via Supabase
+      addBulkSchedule.mutate([{
+        week_number: editEntry.week_number,
+        day_of_week: editEntry.day_of_week,
         month: editEntry.month ?? month,
         year: editEntry.year ?? year,
-        employeeId: editForm.employeeId,
-        machineId: editForm.machineId || '',
-        sectorId: editEntry.sectorId,
-        minifabricaId: editEntry.minifabricaId,
-        checklistId: editForm.checklistId,
+        employee_id: editForm.employee_id,
+        machine_id: editEntry.machine_id || defaultMachine.id,
+        checklist_id: editForm.checklist_id,
+        minifabrica: editEntry.minifabrica,
+        sector: editEntry.sector,
         status: 'pending',
-      });
-      setSchedule(store.getSchedule());
+        scheduled_date: null,
+        completed_date: null,
+      }]);
       setEditEntry(null);
       toast.success('Entrada criada');
       return;
     }
-    store.updateScheduleEntry(editEntry.id, {
-      employeeId: editForm.employeeId,
-      machineId: editForm.machineId || '',
-      checklistId: editForm.checklistId,
-      dayOfWeek: editForm.dayOfWeek,
+    // Atualizar via Supabase
+    console.log('🔄 Atualizando entrada:', {
+      id: editEntry.id,
+      employee_id: editForm.employee_id,
+      checklist_id: editForm.checklist_id,
     });
-    setSchedule(store.getSchedule());
+
+    updateScheduleEntry.mutate({
+      id: editEntry.id,
+      employee_id: editForm.employee_id,
+      checklist_id: editForm.checklist_id,
+    } as any, {
+      onSuccess: () => {
+        console.log('✅ Entrada atualizada com sucesso');
+        // Atualizar estado local imediatamente
+        setSchedule(prev => prev.map(s => 
+          s.id === editEntry.id 
+            ? {
+                ...s,
+                employeeId: editForm.employee_id,
+                checklistId: editForm.checklist_id,
+                employee_id: editForm.employee_id,
+                checklist_id: editForm.checklist_id,
+              }
+            : s
+        ));
+      }
+    });
     setEditEntry(null);
-    toast.success('Entrada atualizada');
   };
 
   const handleDelete = (id: string) => {
     if (isAdmin) return;
-    store.deleteScheduleEntry(id);
-    setSchedule(store.getSchedule());
+    deleteScheduleEntry.mutate(id);
     toast.success('Entrada removida');
   };
 
   const handlePrint = () => window.print();
 
   // Group entries by week -> sector (ONE ROW PER SECTOR - NO DUPLICATES)
-  const groupByWeekSector = useCallback((entries: ScheduleEntry[]) => {
-    const weeks = [...new Set(entries.map(e => e.weekNumber))].sort((a, b) => a - b);
+  const groupByWeekSector = useCallback((entries: any[]) => {
+    const weeks = [...new Set(entries.map(e => e.week_number))].sort((a, b) => a - b);
     return weeks.map(weekNum => {
-      const weekEntries = entries.filter(e => e.weekNumber === weekNum);
+      const weekEntries = entries.filter(e => e.week_number === weekNum);
       
-      // Get unique sectorIds - deduplicate with normalization
+      // Get unique sectors
       const uniqueSectorIds = Array.from(new Set(
         weekEntries
-          .map(e => normalizeText(e.sectorId || ''))
+          .map(e => normalizeText(e.sector || ''))
           .filter(id => id.length > 0)
       ));
       
-      // Create sectorRows - one per unique sectorId
+      // Create sectorRows - one per unique sector
       const sectorRows = uniqueSectorIds.map(sectorId => {
         const sector = sectors.find(s => normalizeText(s.id) === sectorId);
-        const sectorEntries = weekEntries.filter(e => normalizeText(e.sectorId || '') === sectorId);
-        const byDay: Record<number, ScheduleEntry[]> = {};
+        const sectorEntries = weekEntries.filter(e => normalizeText(e.sector || '') === sectorId);
+        const byDay: Record<number, any[]> = {};
         
-        // Include regular days (1-6) and special levels (10, 11)
+        // Include days 1-6 and special levels 10, 11
         [...WEEK_DAYS.map(d => d.key), 10, 11].forEach(d => {
-          byDay[d] = sectorEntries.filter(e => e.dayOfWeek === d);
+          byDay[d] = sectorEntries.filter(e => e.day_of_week === d);
         });
         
         return { sectorId, sectorName: sector?.name || 'N/A', byDay };
@@ -302,7 +643,7 @@ export default function Schedule() {
   const grouped = useMemo(() => groupByWeekSector(filtered), [filtered, groupByWeekSector]);
   const histGrouped = useMemo(() => groupByWeekSector(histFiltered), [histFiltered, groupByWeekSector]);
 
-  const renderCell = (entries: ScheduleEntry[] | undefined, isHistory: boolean, weekNum?: number, sectorId?: string, dayKey?: number) => {
+  const renderCell = (entries: any[] | undefined, isHistory: boolean, weekNum?: number, sectorId?: string, dayKey?: number) => {
     if (!entries || entries.length === 0) {
       if (isHistory || isAdmin) return <span className="text-muted-foreground/30 text-[10px]">—</span>;
       return (
@@ -356,7 +697,7 @@ export default function Schedule() {
   };
 
   const renderScheduleMatrix = (
-    weekGroups: { weekNum: number; sectorRows: { sectorId: string; sectorName: string; byDay: Record<number, ScheduleEntry[]> }[] }[],
+    weekGroups: { weekNum: number; sectorRows: { sectorId: string; sectorName: string; byDay: Record<number, any[]> }[] }[],
     isHistory: boolean
   ) => {
     if (weekGroups.length === 0) return (
@@ -364,9 +705,11 @@ export default function Schedule() {
         <CardContent className="py-12 text-center">
           <p className="text-muted-foreground">Nenhum cronograma para este período.</p>
           {!isHistory && !isAdmin && (
-            <Button className="mt-4" onClick={handleGenerate}>
-              <Wand2 className="mr-2 h-4 w-4" />Gerar Cronograma
-            </Button>
+            <div className="flex gap-2 mt-4 justify-center">
+              <Button onClick={handleGenerate}>
+                <Wand2 className="mr-2 h-4 w-4" />Gerar Cronograma
+              </Button>
+            </div>
           )}
           {!isHistory && isAdmin && (
             <p className="text-sm text-muted-foreground mt-2">Solicite ao diretor da sua minifábrica que gere o cronograma.</p>
@@ -500,10 +843,25 @@ export default function Schedule() {
               <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
               <SelectContent>{[2024, 2025, 2026, 2027].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
             </Select>
+            <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-muted/50">
+              <Checkbox
+                id="five-weeks"
+                checked={allowFiveWeeks}
+                onCheckedChange={(checked) => setAllowFiveWeeks(checked as boolean)}
+              />
+              <Label htmlFor="five-weeks" className="text-sm font-medium cursor-pointer mb-0">
+                Usar 5 semanas
+              </Label>
+            </div>
             {!isAdmin && (
-              <Button variant="outline" onClick={handleGenerate}>
-                <Wand2 className="mr-2 h-4 w-4" />Gerar Automático
-              </Button>
+              <>
+                <Button variant="outline" onClick={handleGenerate}>
+                  <Wand2 className="mr-2 h-4 w-4" />Gerar Automático
+                </Button>
+                <Button variant="destructive" onClick={handleClearSchedule}>
+                  Limpar Cronograma
+                </Button>
+              </>
             )}
             <Button variant="outline" onClick={handlePrint}>
               <Printer className="mr-2 h-4 w-4" />Imprimir
@@ -522,6 +880,16 @@ export default function Schedule() {
               <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
               <SelectContent>{[2024, 2025, 2026, 2027].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
             </Select>
+            <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-muted/50">
+              <Checkbox
+                id="five-weeks-hist"
+                checked={allowFiveWeeks}
+                onCheckedChange={(checked) => setAllowFiveWeeks(checked as boolean)}
+              />
+              <Label htmlFor="five-weeks-hist" className="text-sm font-medium cursor-pointer mb-0">
+                Usar 5 semanas
+              </Label>
+            </div>
             <Button variant="outline" onClick={handlePrint}>
               <Printer className="mr-2 h-4 w-4" />Imprimir
             </Button>
@@ -667,6 +1035,32 @@ export default function Schedule() {
         </TabsContent>
 
         <TabsContent value="model">
+          <div className="flex flex-wrap gap-2 mb-4 no-print">
+            <Select value={String(month)} onValueChange={v => setMonth(Number(v))}>
+              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i)}>{m}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={String(year)} onValueChange={v => setYear(Number(v))}>
+              <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+              <SelectContent>{[2024, 2025, 2026, 2027].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+            </Select>
+            <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-muted/50">
+              <Checkbox
+                id="five-weeks-model"
+                checked={allowFiveWeeks}
+                onCheckedChange={(checked) => setAllowFiveWeeks(checked as boolean)}
+              />
+              <Label htmlFor="five-weeks-model" className="text-sm font-medium cursor-pointer mb-0">
+                Usar 5 semanas
+              </Label>
+            </div>
+            <Button onClick={handleSaveModel} className="ml-auto">
+              <Save className="mr-2 h-4 w-4" />Salvar Modelo
+            </Button>
+            <Button variant="outline" onClick={handleClearModel}>
+              Limpar Modelo
+            </Button>
+          </div>
           <Card>
             <CardContent className="p-4">
               <div className="overflow-x-auto">
@@ -686,7 +1080,7 @@ export default function Schedule() {
                     </tr>
                   </thead>
                   <tbody>
-                    {getWeeksOfMonthISO(month, year).map((w, wIdx) => (
+                    {getWeeksOfMonthISO(month, year, allowFiveWeeks).map((w, wIdx) => (
                       sectors.map((sectorObj, sIdx) => (
                         <tr key={`${w}-${sectorObj.id}`}>
                           {sIdx === 0 && <td rowSpan={sectors.length} className="border p-2 bg-gray-100 font-bold text-center align-middle">{w}</td>}
@@ -717,10 +1111,7 @@ export default function Schedule() {
                   </tbody>
                 </table>
               </div>
-              <div className="mt-4 flex gap-2">
-                <Button onClick={handleSaveModel}>Salvar Modelo</Button>
-                <Button variant="outline" onClick={() => { setScheduleModel([]); toast.success('Modelo limpo'); }}>Limpar</Button>
-              </div>
+              <p className="text-xs text-amber-600 mt-2">💡 Dica: Você não precisa salvar modelo. Basta clicar em "Gerar Cronograma" que o sistema cria automaticamente!</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -733,34 +1124,25 @@ export default function Schedule() {
           <div className="space-y-4">
             <div>
               <Label>Dia da Semana</Label>
-              <Select value={String(editForm.dayOfWeek)} onValueChange={v => setEditForm(f => ({ ...f, dayOfWeek: Number(v) }))}>
+              <Select value={String(editForm.day_of_week)} onValueChange={v => setEditForm(f => ({ ...f, day_of_week: Number(v) }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {WEEK_DAYS.map(d => <SelectItem key={d.key} value={String(d.key)}>{d.label}</SelectItem>)}
-                  {editForm.dayOfWeek === 10 && <SelectItem value="10">Nível 02 Semanal</SelectItem>}
-                  {editForm.dayOfWeek === 11 && <SelectItem value="11">Demais Níveis</SelectItem>}
+                  {editForm.day_of_week === 10 && <SelectItem value="10">Nível 02 Semanal</SelectItem>}
+                  {editForm.day_of_week === 11 && <SelectItem value="11">Demais Níveis</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>Funcionário</Label>
-              <Select value={editForm.employeeId} onValueChange={v => setEditForm(f => ({ ...f, employeeId: v }))}>
+              <Select value={editForm.employee_id} onValueChange={v => setEditForm(f => ({ ...f, employee_id: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{employeesFiltered.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            {editForm.dayOfWeek <= 6 && (
-              <div>
-                <Label>Máquina</Label>
-                <Select value={editForm.machineId} onValueChange={v => setEditForm(f => ({ ...f, machineId: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{machinesFiltered.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            )}
             <div>
               <Label>Checklist</Label>
-              <Select value={editForm.checklistId} onValueChange={v => setEditForm(f => ({ ...f, checklistId: v }))}>
+              <Select value={editForm.checklist_id} onValueChange={v => setEditForm(f => ({ ...f, checklist_id: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{checklists.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>

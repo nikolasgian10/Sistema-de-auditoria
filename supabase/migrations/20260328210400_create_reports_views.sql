@@ -27,18 +27,57 @@ AS $$
   WHERE audit_answers.audit_id = audit_id;
 $$;
 
--- Function to determine audit status based on conformity
+-- Function to determine audit status based on answers (not percentage)
+-- Priority: NOK > NA > OK
 CREATE OR REPLACE FUNCTION public.determine_audit_status(conformity_percentage NUMERIC)
 RETURNS TEXT
-LANGUAGE sql
-IMMUTABLE
+LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 AS $$
-  SELECT CASE
-    WHEN conformity_percentage >= 90 THEN 'conforme'
-    WHEN conformity_percentage >= 70 THEN 'parcial'
-    ELSE 'nao_conforme'
-  END;
+BEGIN
+  -- This function is deprecated in favor of determine_audit_status_from_answers
+  -- Kept for backwards compatibility but should not be used
+  RETURN 'parcial';
+END;
+$$;
+
+-- Function to determine audit status based on actual answer conformities
+CREATE OR REPLACE FUNCTION public.determine_audit_status_from_answers(audit_id UUID)
+RETURNS TEXT
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+AS $$
+DECLARE
+  has_nok BOOLEAN;
+  has_na BOOLEAN;
+  count_ok INTEGER;
+  total_count INTEGER;
+BEGIN
+  -- Check for NOK answers
+  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE audit_id = $1 AND conformity = 'nok')
+  INTO has_nok;
+  
+  -- Check for NA answers
+  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE audit_id = $1 AND conformity = 'na')
+  INTO has_na;
+  
+  -- Get OK and total counts
+  SELECT COUNT(*) FILTER(WHERE conformity = 'ok'), COUNT(*)
+  INTO count_ok, total_count
+  FROM public.audit_answers 
+  WHERE audit_id = $1;
+  
+  -- Apply priority logic: NOK > NA > OK
+  IF has_nok THEN
+    RETURN 'nao_conforme';
+  ELSIF count_ok = total_count AND total_count > 0 THEN
+    RETURN 'conforme';
+  ELSE
+    RETURN 'parcial';
+  END IF;
+END;
 $$;
 
 -- Function to get auditor name
@@ -311,7 +350,7 @@ BEGIN
   UPDATE public.audits
   SET 
     conformity_percentage = public.calculate_audit_conformity(NEW.audit_id)::INTEGER,
-    status = public.determine_audit_status(public.calculate_audit_conformity(NEW.audit_id)),
+    status = public.determine_audit_status_from_answers(NEW.audit_id),
     updated_at = NOW()
   WHERE id = NEW.audit_id;
   

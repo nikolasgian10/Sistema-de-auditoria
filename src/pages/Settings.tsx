@@ -122,10 +122,16 @@ export default function Settings() {
         }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(`Resposta inválida do servidor (${response.status})`);
+      }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Erro ao criar usuário');
+        throw new Error(data?.error || 'Erro ao criar usuário');
       }
 
       toast.success('Usuário criado com sucesso!');

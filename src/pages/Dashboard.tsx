@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { store } from '@/lib/store';
 import { useAuth } from '@/lib/auth';
 import { useMachines } from '@/hooks/use-machines';
 import { useChecklists } from '@/hooks/use-checklists';
+import { useScheduleEntries } from '@/hooks/use-schedule';
+import { useAudits } from '@/hooks/use-audits';
 import { ClipboardCheck, Cog, CalendarDays, AlertTriangle, CheckCircle2, Clock, TrendingUp, TrendingDown, Target, ShieldAlert, Wrench, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, AreaChart, Area, Legend } from 'recharts';
@@ -16,29 +17,35 @@ const fadeIn = {
 const COLORS = ['hsl(152, 60%, 40%)', 'hsl(0, 72%, 51%)', 'hsl(38, 92%, 50%)', 'hsl(200, 80%, 50%)', 'hsl(270, 60%, 50%)', 'hsl(330, 60%, 50%)'];
 
 export default function Dashboard() {
-  const { getEffectiveMinifabrica, allUsers } = useAuth();
+  const { getEffectiveMinifabrica, allUsers, currentUser } = useAuth();
   const effectiveMinifabrica = getEffectiveMinifabrica();
 
+  const now = new Date();
   const { data: allMachines = [] } = useMachines();
   const { data: dbChecklists = [] } = useChecklists();
+  const { data: scheduleData = [] } = useScheduleEntries({ month: now.getMonth(), year: now.getFullYear() });
+  const { data: auditsData = [] } = useAudits({
+    userRole: currentUser?.role,
+    userId: currentUser?.id,
+    userMinifabrica: currentUser?.minifabrica,
+  });
+
   const machines = effectiveMinifabrica ? allMachines.filter(m => m.minifabrica === effectiveMinifabrica) : allMachines;
   const machineIds = new Set(machines.map(m => m.id));
 
   const checklists = dbChecklists.map(c => ({ id: c.id, name: c.name, category: c.category, items: c.items, createdAt: c.created_at }));
-  const allSchedule = store.getSchedule();
-  const schedule = effectiveMinifabrica ? allSchedule.filter(s => machineIds.has(s.machineId)) : allSchedule;
-  const allAudits = store.getAudits();
-  const audits = effectiveMinifabrica ? allAudits.filter(a => machineIds.has(a.machineId)) : allAudits;
+  const schedule = effectiveMinifabrica ? scheduleData.filter(s => (s as any).machine_id && machineIds.has((s as any).machine_id)) : scheduleData;
+  const audits = effectiveMinifabrica ? auditsData.filter(a => (a as any).machine_id && machineIds.has((a as any).machine_id)) : auditsData;
   const employees = effectiveMinifabrica
     ? allUsers.filter(e => e.minifabrica === effectiveMinifabrica)
     : allUsers;
 
   const stats = useMemo(() => {
-    const pending = schedule.filter(s => s.status === 'pending').length;
-    const completed = schedule.filter(s => s.status === 'completed').length;
-    const conformeCount = audits.filter(a => a.status === 'conforme').length;
-    const naoConformeCount = audits.filter(a => a.status === 'nao_conforme').length;
-    const parcialCount = audits.filter(a => a.status === 'parcial').length;
+    const pending = schedule.filter(s => (s as any).status === 'pending').length;
+    const completed = schedule.filter(s => (s as any).status === 'completed').length;
+    const conformeCount = audits.filter(a => (a as any).status === 'conforme').length;
+    const naoConformeCount = audits.filter(a => (a as any).status === 'nao_conforme').length;
+    const parcialCount = audits.filter(a => (a as any).status === 'parcial').length;
     const conformityRate = audits.length > 0 ? Math.round((conformeCount / audits.length) * 100) : 0;
     return { pending, completed, conformeCount, naoConformeCount, parcialCount, conformityRate };
   }, [schedule, audits]);
@@ -46,8 +53,9 @@ export default function Dashboard() {
   const worstMachine = useMemo(() => {
     if (audits.length === 0) return null;
     const counts: Record<string, number> = {};
-    audits.filter(a => a.status === 'nao_conforme').forEach(a => {
-      counts[a.machineId] = (counts[a.machineId] || 0) + 1;
+    audits.filter(a => (a as any).status === 'nao_conforme').forEach(a => {
+      const machineId = (a as any).machine_id;
+      counts[machineId] = (counts[machineId] || 0) + 1;
     });
     const worstId = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
     if (!worstId) return null;
@@ -59,8 +67,9 @@ export default function Dashboard() {
     if (audits.length === 0) return null;
     const counts: Record<string, number> = {};
     audits.forEach(a => {
-      a.answers.filter(ans => ans.conformity === 'nok').forEach(ans => {
-        counts[ans.checklistItemId] = (counts[ans.checklistItemId] || 0) + 1;
+      const answers = (a as any).audit_answers || [];
+      answers.filter((ans: any) => ans.conformity === 'nok').forEach((ans: any) => {
+        counts[ans.checklist_item_id] = (counts[ans.checklist_item_id] || 0) + 1;
       });
     });
     const worstId = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
@@ -77,9 +86,9 @@ export default function Dashboard() {
     if (audits.length === 0) return null;
     let best = { name: '', rate: 0 };
     employees.forEach(emp => {
-      const empAudits = audits.filter(a => a.employeeId === emp.id);
+      const empAudits = audits.filter(a => (a as any).employee_id === emp.id);
       if (empAudits.length >= 3) {
-        const rate = Math.round((empAudits.filter(a => a.status === 'conforme').length / empAudits.length) * 100);
+        const rate = Math.round((empAudits.filter(a => (a as any).status === 'conforme').length / empAudits.length) * 100);
         if (rate > best.rate) best = { name: emp.name, rate };
       }
     });
@@ -90,11 +99,11 @@ export default function Dashboard() {
     if (audits.length === 0) return null;
     const sectors: Record<string, { total: number; nok: number }> = {};
     audits.forEach(a => {
-      const m = machines.find(x => x.id === a.machineId);
+      const m = machines.find(x => x.id === (a as any).machine_id);
       if (m) {
         if (!sectors[m.sector]) sectors[m.sector] = { total: 0, nok: 0 };
         sectors[m.sector].total++;
-        if (a.status === 'nao_conforme') sectors[m.sector].nok++;
+        if ((a as any).status === 'nao_conforme') sectors[m.sector].nok++;
       }
     });
     const worst = Object.entries(sectors).sort((a, b) => (b[1].nok / b[1].total) - (a[1].nok / a[1].total))[0];
@@ -109,19 +118,19 @@ export default function Dashboard() {
 
   const machineNokData = useMemo(() => {
     return machines.map(m => {
-      const machAudits = audits.filter(a => a.machineId === m.id);
+      const machAudits = audits.filter(a => (a as any).machine_id === m.id);
       return {
         name: m.name.length > 12 ? m.name.substring(0, 12) + '…' : m.name,
-        nok: machAudits.filter(a => a.status === 'nao_conforme').length,
-        ok: machAudits.filter(a => a.status === 'conforme').length,
+        nok: machAudits.filter(a => (a as any).status === 'nao_conforme').length,
+        ok: machAudits.filter(a => (a as any).status === 'conforme').length,
       };
     }).sort((a, b) => b.nok - a.nok);
   }, [audits, machines]);
 
   const categoryRadarData = useMemo(() => {
     return checklists.map(ck => {
-      const ckAudits = audits.filter(a => a.checklistId === ck.id);
-      const rate = ckAudits.length > 0 ? Math.round((ckAudits.filter(a => a.status === 'conforme').length / ckAudits.length) * 100) : 0;
+      const ckAudits = audits.filter(a => (a as any).checklist_id === ck.id);
+      const rate = ckAudits.length > 0 ? Math.round((ckAudits.filter(a => (a as any).status === 'conforme').length / ckAudits.length) * 100) : 0;
       return { category: ck.category, conformidade: rate, fullMark: 100 };
     });
   }, [audits, checklists]);
@@ -130,16 +139,16 @@ export default function Dashboard() {
     if (audits.length === 0) return [];
     const now = new Date();
     const eightWeeksAgo = new Date(now.getTime() - 8 * 7 * 24 * 60 * 60 * 1000);
-    const recentAudits = audits.filter(a => new Date(a.createdAt) >= eightWeeksAgo);
+    const recentAudits = audits.filter(a => new Date((a as any).created_at) >= eightWeeksAgo);
     const weeks: Record<number, { sem: string; total: number; conforme: number; naoConforme: number }> = {};
     recentAudits.forEach(a => {
-      const d = new Date(a.createdAt);
+      const d = new Date((a as any).created_at);
       const oneJan = new Date(d.getFullYear(), 0, 1);
       const w = Math.ceil((((d.getTime() - oneJan.getTime()) / 86400000) + oneJan.getDay() + 1) / 7);
       if (!weeks[w]) weeks[w] = { sem: `Sem ${w}`, total: 0, conforme: 0, naoConforme: 0 };
       weeks[w].total++;
-      if (a.status === 'conforme') weeks[w].conforme++;
-      if (a.status === 'nao_conforme') weeks[w].naoConforme++;
+      if ((a as any).status === 'conforme') weeks[w].conforme++;
+      if ((a as any).status === 'nao_conforme') weeks[w].naoConforme++;
     });
     return Object.values(weeks).sort((a, b) => {
       const na = parseInt(a.sem.replace('Sem ', ''));
@@ -329,19 +338,19 @@ export default function Dashboard() {
               <p className="text-sm text-muted-foreground">Nenhuma auditoria pendente. Gere um cronograma.</p>
             ) : (
               <div className="space-y-3">
-                {schedule.filter(s => s.status === 'pending').slice(0, 5).map(entry => {
-                  const emp = employees.find(e => e.id === entry.employeeId);
-                  const mach = machines.find(m => m.id === entry.machineId);
-                  const ck = checklists.find(c => c.id === entry.checklistId);
+                {schedule.filter(s => (s as any).status === 'pending').slice(0, 5).map(entry => {
+                  const emp = employees.find(e => e.id === (entry as any).employee_id);
+                  const mach = machines.find(m => m.id === (entry as any).machine_id);
+                  const ck = checklists.find(c => c.id === (entry as any).checklist_id);
                   const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
                   return (
-                    <div key={entry.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div key={(entry as any).id} className="flex items-center justify-between rounded-md border p-3">
                       <div>
                         <p className="text-sm font-medium">{emp?.name || 'N/A'}</p>
                         <p className="text-xs text-muted-foreground">{mach?.name} · {ck?.name}</p>
                       </div>
                       <span className="rounded bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground">
-                        Sem {entry.weekNumber} · {days[entry.dayOfWeek]}
+                        Sem {(entry as any).week_number} · {days[(entry as any).day_of_week]}
                       </span>
                     </div>
                   );
@@ -361,22 +370,23 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {audits.slice(-5).reverse().map(audit => {
-                  const emp = employees.find(e => e.id === audit.employeeId);
-                  const mach = machines.find(m => m.id === audit.machineId);
-                  const statusColors = {
+                  const emp = employees.find(e => e.id === (audit as any).employee_id);
+                  const mach = machines.find(m => m.id === (audit as any).machine_id);
+                  const statusColors: Record<string, string> = {
                     conforme: 'bg-emerald-500/10 text-emerald-600',
                     nao_conforme: 'bg-destructive/10 text-destructive',
                     parcial: 'bg-yellow-500/10 text-yellow-600',
                   };
-                  const statusLabels = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
+                  const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
+                  const auditStatus = (audit as any).status;
                   return (
-                    <div key={audit.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div key={(audit as any).id} className="flex items-center justify-between rounded-md border p-3">
                       <div>
                         <p className="text-sm font-medium">{emp?.name || 'N/A'}</p>
-                        <p className="text-xs text-muted-foreground">{mach?.name} · {new Date(audit.createdAt).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-xs text-muted-foreground">{mach?.name} · {new Date((audit as any).created_at).toLocaleDateString('pt-BR')}</p>
                       </div>
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColors[audit.status]}`}>
-                        {statusLabels[audit.status]}
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColors[auditStatus] || ''}`}>
+                        {statusLabels[auditStatus] || 'Desconhecido'}
                       </span>
                     </div>
                   );

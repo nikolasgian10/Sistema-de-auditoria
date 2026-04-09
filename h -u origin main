@@ -1,0 +1,10 @@
+[33mf71a8fa[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m cronograma ajustado
+[33m0b1f63d[m check quase pronto
+[33mdf3fea2[m Arrumando modelo lpa
+[33m15fc750[m Atualizar filtro de minifabrica e checklist selection no mobile
+[33m0d84eec[m fix: corrigido erro supabase apikey
+[33m9a16a3a[m tentativa de corrigir novamente
+[33m4461032[m corrigindo variaveis supabase novamente
+[33m6590a5a[m corrigindo variaveis supabase
+[33mf0b470a[m Remove unnecessary PUBLISHABLE_KEY variable
+[33m7994134[m Fix API key header for REST endpoints
