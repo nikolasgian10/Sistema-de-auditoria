@@ -38,6 +38,7 @@ export default function ChecklistTemplate() {
 
   const [title, setTitle] = useState('LPA N1 – CHECK LIST MAN & M.C.');
   const [sideLabel, setSideLabel] = useState('MAN. & M.C');
+  const [level, setLevel] = useState<'1' | '2' | 'other'>('1');
   const [sideColor, setSideColor] = useState('#16a34a');
   const [auditorName, setAuditorName] = useState('');
   const [date, setDate] = useState('');
@@ -54,6 +55,7 @@ export default function ChecklistTemplate() {
         setSelectedChecklist(editingId);
         setTitle(`LPA N1 – ${ck.name.toUpperCase()}`);
         setSideLabel(ck.category.toUpperCase());
+        setLevel((ck.level || '1') as '1' | '2' | 'other');
         setItems(ck.items.map(item => ({
           id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
           type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
@@ -83,6 +85,7 @@ export default function ChecklistTemplate() {
     setSelectedChecklist(ckId);
     setTitle(`LPA N1 – ${ck.name.toUpperCase()}`);
     setSideLabel(ck.category.toUpperCase());
+    setLevel((ck.level || '1') as '1' | '2' | 'other');
     setItems(ck.items.map(item => ({
       id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
       type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
@@ -107,6 +110,7 @@ export default function ChecklistTemplate() {
     const checklistData = {
       name: cleanTitle,
       category: sideLabel,
+      level,
       items: items.map(it => ({ question: it.question, explanation: it.explanation, type: it.type })),
     };
     if (editingId || selectedChecklist) {
@@ -187,6 +191,14 @@ export default function ChecklistTemplate() {
             <SelectTrigger className="w-52 h-8 text-xs"><SelectValue placeholder="Carregar checklist..." /></SelectTrigger>
             <SelectContent>
               {checklists.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={level} onValueChange={(value) => setLevel(value as '1' | '2' | 'other')}>
+            <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Nível" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Nível 1</SelectItem>
+              <SelectItem value="2">Nível 2</SelectItem>
+              <SelectItem value="other">Outros Níveis</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" size="sm" onClick={addItem}><Plus className="mr-1 h-3 w-3" />Item</Button>

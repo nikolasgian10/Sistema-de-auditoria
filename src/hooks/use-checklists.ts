@@ -15,6 +15,7 @@ export interface Checklist {
   id: string;
   name: string;
   category: string;
+  level: string;
   minifabrica: string;
   created_at: string;
   items: ChecklistItem[];
@@ -24,6 +25,7 @@ interface RawChecklist {
   id: string;
   name: string;
   category: string;
+  level: string;
   minifabrica: string;
   created_at: string;
   checklist_items: ChecklistItem[];
@@ -40,6 +42,7 @@ export function useChecklists() {
       if (error) throw error;
       return ((data || []) as unknown as RawChecklist[]).map(c => ({
         ...c,
+        level: c.level || '1',
         items: (c.checklist_items || []).sort((a, b) => a.sort_order - b.sort_order),
       })) as Checklist[];
     },
@@ -49,10 +52,10 @@ export function useChecklists() {
 export function useAddChecklist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { name: string; category: string; minifabrica?: string; items: { question: string; explanation: string; type: string }[] }) => {
+    mutationFn: async (input: { name: string; category: string; level?: string; minifabrica?: string; items: { question: string; explanation: string; type: string }[] }) => {
       const { data: ck, error } = await supabase
         .from('checklists')
-        .insert({ name: input.name, category: input.category, minifabrica: input.minifabrica || '' })
+        .insert({ name: input.name, category: input.category, level: input.level || '1', minifabrica: input.minifabrica || '' })
         .select()
         .single();
       if (error) throw error;
@@ -81,10 +84,10 @@ export function useAddChecklist() {
 export function useUpdateChecklist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; name: string; category: string; items: { question: string; explanation: string; type: string }[] }) => {
+    mutationFn: async (input: { id: string; name: string; category: string; level?: string; items: { question: string; explanation: string; type: string }[] }) => {
       const { error } = await supabase
         .from('checklists')
-        .update({ name: input.name, category: input.category })
+        .update({ name: input.name, category: input.category, level: input.level || '1' })
         .eq('id', input.id);
       if (error) throw error;
 

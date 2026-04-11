@@ -32,6 +32,20 @@ export function getMinifabricaName(id: string): string {
   return MINIFABRICAS.find(m => m.id === id)?.name || id;
 }
 
+export const DEFAULT_SECTORS_PER_WEEK_FOR_MINIFABRICA: Record<string, number> = {
+  'MFASC': 5,
+  'MFAN': 5,
+  'MFPA': 5,
+  'MFBA': 5,
+  'MFBR': 5,
+  'MFBL': 5,
+  'FERR': 5,
+  'MFACC': 5,
+  'LOG': 5,
+  'RH': 5,
+  'QC': 5,
+};
+
 export function getSectorsForMinifabrica(minifabricaId: string): string[] {
   // Check localStorage for custom sectors first
   try {
@@ -43,4 +57,17 @@ export function getSectorsForMinifabrica(minifabricaId: string): string[] {
 
 export function setSectorsForMinifabrica(minifabricaId: string, sectors: string[]) {
   localStorage.setItem(`lpa_sectors_${minifabricaId}`, JSON.stringify(sectors));
+}
+
+export function getSectorsPerWeekForMinifabrica(minifabricaId: string): number {
+  try {
+    const custom = localStorage.getItem(`lpa_sectors_per_week_${minifabricaId}`);
+    const value = custom ? Number(custom) : NaN;
+    if (Number.isFinite(value) && value > 0) return Math.max(1, Math.min(7, value));
+  } catch {}
+  return DEFAULT_SECTORS_PER_WEEK_FOR_MINIFABRICA[minifabricaId] || 5;
+}
+
+export function setSectorsPerWeekForMinifabrica(minifabricaId: string, count: number) {
+  localStorage.setItem(`lpa_sectors_per_week_${minifabricaId}`, String(Math.max(1, Math.min(7, count))));
 }

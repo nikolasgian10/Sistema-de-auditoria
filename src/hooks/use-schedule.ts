@@ -256,6 +256,70 @@ export function useAddScheduleModel() {
   });
 }
 
+export function useAddBulkScheduleModels() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (models: Omit<ScheduleModel, 'id' | 'created_at' | 'updated_at' | 'created_by'>[]) => {
+      console.log('🔵 useAddBulkScheduleModels: iniciando com', models.length, 'modelos');
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) throw new Error('User not authenticated');
+
+      const payload = models.map(model => ({
+        ...model,
+        created_by: user.user.id,
+      }));
+
+      const { data, error } = await (supabase as any)
+        .from('schedule_model')
+        .insert(payload)
+        .select();
+
+      if (error) {
+        console.error('❌ useAddBulkScheduleModels error:', error);
+        throw error;
+      }
+
+      console.log('🟢 useAddBulkScheduleModels: modelos criados com sucesso:', data);
+      return data as any[];
+    },
+    onSuccess: () => {
+      console.log('🟢 useAddBulkScheduleModels onSuccess: invalidando queries');
+      qc.invalidateQueries({ queryKey: ['schedule-models'] });
+      toast.success('✅ Modelos de cronograma criados!');
+    },
+    onError: (e: any) => {
+      console.error('❌ useAddBulkScheduleModels onError:', e);
+      toast.error(`❌ ${e.message || 'Erro ao criar modelos'}`);
+    }
+  });
+}
+
+export function useDeleteScheduleModels() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { minifabrica: string; week_index?: number }) => {
+      let query = (supabase as any)
+        .from('schedule_model')
+        .delete();
+
+      if (params.minifabrica) {
+        query = query.eq('minifabrica' as any, params.minifabrica);
+      }
+      if (params.week_index !== undefined) {
+        query = query.eq('week_index' as any, params.week_index);
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schedule-models'] });
+      toast.success('Modelos antigos removidos');
+    },
+    onError: (e: any) => toast.error(e.message || 'Erro ao remover modelos antigos'),
+  });
+}
+
 export function useDeleteScheduleModel() {
   const qc = useQueryClient();
   return useMutation({
