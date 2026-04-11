@@ -281,59 +281,92 @@ export default function Schedule() {
     const entriesToCreate: any[] = [];
     const checklistAssignments = new Map<string, Set<string>>();
 
+    // Agrupar máquinas por setor
+    const machinesBySector = new Map<string, any[]>();
+    machinesFiltered.forEach(m => {
+      const sectorKey = normalizeText(m.sector || '');
+      if (!machinesBySector.has(sectorKey)) {
+        machinesBySector.set(sectorKey, []);
+      }
+      machinesBySector.get(sectorKey)!.push(m);
+    });
+
+    const sectorKeys = Array.from(machinesBySector.keys());
+    const maxSectorsPerWeek = 5;
+
+    const getWeekSectors = (weekIndex: number) => {
+      if (sectorKeys.length <= maxSectorsPerWeek) return sectorKeys;
+      const selected: string[] = [];
+      for (let i = 0; i < maxSectorsPerWeek; i++) {
+        const sectorIndex = ((weekIndex - 1) * maxSectorsPerWeek + i) % sectorKeys.length;
+        selected.push(sectorKeys[sectorIndex]);
+      }
+      return selected;
+    };
+
     // Para cada modelo (funcionário + semana)
     for (const model of modelsToUse) {
       const weekIndex = model.week_index || 1;
       if (weekIndex < 1 || weekIndex > weeks.length) continue;
-      
+
       const weekNumber = weeks[weekIndex - 1];
       const employee = employees.find(e => e.id === model.employee_id);
-      
       if (!employee) {
         console.warn(`⚠️ Funcionário não encontrado`);
         continue;
       }
 
-      // Agrupar máquinas por setor
-      const machinesBySector = new Map<string, any[]>();
-      machinesFiltered.forEach(m => {
-        const sectorKey = normalizeText(m.sector || '');
-        if (!machinesBySector.has(sectorKey)) {
-          machinesBySector.set(sectorKey, []);
-        }
-        machinesBySector.get(sectorKey)!.push(m);
-      });
+      if (dbScheduleModels.length > 0) {
+        const sectorKey = normalizeText(model.sector || '');
+        const sectorMachines = machinesBySector.get(sectorKey);
+        if (!sectorMachines || sectorMachines.length === 0) continue;
 
-      // Para cada setor, criar 1 entrada por dia (segunda a sexta)
-      machinesBySector.forEach((machinesInSector, sectorKey) => {
+        const machine = sectorMachines[(model.day_of_week - 1) % sectorMachines.length] || sectorMachines[0];
+        const checklist = dbChecklists.find(c => c.id === model.checklist_id) || dbChecklists[0];
+        if (!checklist) continue;
+
+        entriesToCreate.push({
+          employee_id: employee.id,
+          machine_id: machine.id,
+          checklist_id: checklist.id,
+          week_number: weekNumber,
+          day_of_week: model.day_of_week || 1,
+          month,
+          year,
+          status: 'pending',
+          minifabrica: machine.minifabrica || '',
+          sector: machine.sector || '',
+        });
+        continue;
+      }
+
+      const weekSectorKeys = getWeekSectors(weekIndex);
+      for (const sectorKey of weekSectorKeys) {
+        const machinesInSector = machinesBySector.get(sectorKey);
+        if (!machinesInSector || machinesInSector.length === 0) continue;
+
         for (let dayOfWeek = 1; dayOfWeek <= 5; dayOfWeek++) {
-          // Selecionar uma máquina do setor (rotacionando entre as máquinas)
           const machineIdx = (dayOfWeek - 1) % machinesInSector.length;
           const machine = machinesInSector[machineIdx];
 
-          // Checklists válidos para este setor
           let validChecklists = dbChecklists.filter(c => 
             !c.category || c.category === machine.sector || c.category === 'geral'
           );
-          
           if (validChecklists.length === 0) {
-            validChecklists = dbChecklists; // Usar todos se nenhum específico
+            validChecklists = dbChecklists;
           }
 
-          // Rastrear checklist por (usuario + setor + semana + dia)
           const trackKey = `${employee.id}|${machine.sector}|${weekNumber}|${dayOfWeek}`;
           if (!checklistAssignments.has(trackKey)) {
             checklistAssignments.set(trackKey, new Set());
           }
           const usedChecklists = checklistAssignments.get(trackKey)!;
 
-          // Encontrar checklist não usado este dia
           const availableChecklists = validChecklists.filter(c => !usedChecklists.has(c.id));
           if (availableChecklists.length === 0) {
             usedChecklists.clear();
           }
 
-          // Atribuir um checklist
           const checklist = availableChecklists[0] || validChecklists[0];
           if (checklist) {
             usedChecklists.add(checklist.id);
@@ -352,7 +385,7 @@ export default function Schedule() {
             sector: machine.sector || '',
           });
         }
-      });
+      }
     }
 
     if (entriesToCreate.length === 0) {

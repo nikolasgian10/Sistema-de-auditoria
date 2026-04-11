@@ -56,18 +56,18 @@ DECLARE
   total_count INTEGER;
 BEGIN
   -- Check for NOK answers
-  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE audit_id = $1 AND conformity = 'nok')
+  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE public.audit_answers.audit_id = $1 AND conformity = 'nok')
   INTO has_nok;
   
   -- Check for NA answers
-  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE audit_id = $1 AND conformity = 'na')
+  SELECT EXISTS(SELECT 1 FROM public.audit_answers WHERE public.audit_answers.audit_id = $1 AND conformity = 'na')
   INTO has_na;
   
   -- Get OK and total counts
   SELECT COUNT(*) FILTER(WHERE conformity = 'ok'), COUNT(*)
   INTO count_ok, total_count
   FROM public.audit_answers 
-  WHERE audit_id = $1;
+  WHERE public.audit_answers.audit_id = $1;
   
   -- Apply priority logic: NOK > NA > OK
   IF has_nok THEN

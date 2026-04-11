@@ -10,13 +10,15 @@ export interface AuditItem {
 
 export interface Audit {
   id: string;
-  schedule_entry_id: string;
+  schedule_entry_id: string | null;
   employee_id: string;
   machine_id: string;
   checklist_id: string;
   minifabrica: string;
   date: string;
   observations: string;
+  auditado_re: string;
+  auditado_nome: string;
   status: 'pendente' | 'conforme' | 'nao_conforme' | 'parcial';
   conformity_percentage: number;
   created_at: string;
@@ -93,13 +95,15 @@ export function useAddAudit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      schedule_entry_id: string;
+      schedule_entry_id: string | null;
       employee_id: string;
       machine_id: string;
       checklist_id: string;
       minifabrica: string;
       date: string;
       observations: string;
+      auditado_re: string;
+      auditado_nome: string;
       answers: AuditItem[];
       photos: string[]; // base64 encoded
       status: 'conforme' | 'nao_conforme' | 'parcial';
@@ -132,6 +136,8 @@ export function useAddAudit() {
           minifabrica: input.minifabrica,
           date: input.date,
           observations: input.observations,
+          auditado_re: input.auditado_re,
+          auditado_nome: input.auditado_nome,
           status: calculatedStatus,
           conformity_percentage: 0,
           created_by: user.user.id,
@@ -170,14 +176,14 @@ export function useAddAudit() {
           const filePath = `audits/${audit.id}/${fileName}`;
 
           const { error: uploadError } = await supabase.storage
-            .from('audit-photos')
+            .from('audit-attachments')
             .upload(filePath, bytes, { contentType: 'image/jpeg' });
 
           if (uploadError) throw uploadError;
 
           // Get public URL
           const { data: urlData } = supabase.storage
-            .from('audit-photos')
+            .from('audit-attachments')
             .getPublicUrl(filePath);
 
           // Insert attachment record with public URL

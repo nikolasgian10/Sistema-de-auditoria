@@ -42,7 +42,7 @@ export default function Dashboard() {
 
   const stats = useMemo(() => {
     const pending = schedule.filter(s => (s as any).status === 'pending').length;
-    const completed = schedule.filter(s => (s as any).status === 'completed').length;
+    const completed = audits.filter(a => (a as any).status !== 'pendente').length;
     const conformeCount = audits.filter(a => (a as any).status === 'conforme').length;
     const naoConformeCount = audits.filter(a => (a as any).status === 'nao_conforme').length;
     const parcialCount = audits.filter(a => (a as any).status === 'parcial').length;

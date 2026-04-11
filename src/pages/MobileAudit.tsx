@@ -138,20 +138,15 @@ export default function MobileAudit() {
   const handleSubmit = () => {
     if (!machine || !checklist || !authUser) return;
     
-    // Calculate status with priority: NOK > NA > OK
     const anyNok = answers.some(a => a.conformity === 'nok');
-    const anyNA = answers.some(a => a.conformity === 'na');
     const allOk = answers.every(a => a.conformity === 'ok');
     
-    let finalStatus: 'conforme' | 'nao_conforme' | 'parcial';
-    if (anyNok) {
-      finalStatus = 'nao_conforme';
-    } else if (allOk) {
-      finalStatus = 'conforme';
-    } else {
-      finalStatus = 'parcial';
-    }
-    
+    const finalStatus: 'conforme' | 'nao_conforme' | 'parcial' = anyNok
+      ? 'nao_conforme'
+      : allOk
+        ? 'conforme'
+        : 'parcial';
+
     addAuditMutation.mutate({
       schedule_entry_id: scheduleEntryId,
       employee_id: authUser.id,
@@ -160,6 +155,8 @@ export default function MobileAudit() {
       minifabrica: machine.minifabrica || minifabrica || '',
       date: new Date().toISOString().split('T')[0],
       observations,
+      auditado_re: auditadoRE,
+      auditado_nome: auditadoNome,
       answers: answers.map(a => ({
         checklist_item_id: a.checklistItemId,
         answer: a.answer,
@@ -167,13 +164,11 @@ export default function MobileAudit() {
       })),
       photos,
       status: finalStatus,
-    });
-    
-    setTimeout(() => {
-      if (!addAuditMutation.isPending) {
+    }, {
+      onSuccess: () => {
         setStage('done');
-      }
-    }, 500);
+      },
+    });
   };
 
   const reset = () => { setStage('scan'); setSector(null); setMachine(null); setChecklist(null); setScheduleEntryId(null); setSchedulesForSector([]); setAnswers([]); setObservations(''); setPhotos([]); setManualCode(''); setAuditorName(''); setTurno(''); setAuditadoRE(''); setAuditadoNome(''); };

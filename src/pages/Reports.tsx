@@ -75,7 +75,7 @@ export default function Reports() {
 
   const handleExport = () => {
     const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
-    const header = ['Data', 'Auditor', 'Máquina', 'Código Máq.', 'Setor', 'Checklist', 'Status', 'Observações', 'Respostas'];
+    const header = ['Data', 'Auditor', 'RE Auditado', 'Nome Auditado', 'Máquina', 'Código Máq.', 'Setor', 'Checklist', 'Status', 'Observações', 'Respostas'];
     const rows = filtered.map(audit => {
       const aAny = audit as any;
       const emp = employees.find(e => e.id === aAny.employee_id);
@@ -88,6 +88,8 @@ export default function Reports() {
       return [
         new Date(aAny.created_at).toLocaleDateString('pt-BR'),
         emp?.name || '',
+        aAny.auditado_re || '',
+        aAny.auditado_nome || '',
         mach?.name || '',
         mach?.code || '',
         mach?.sector || '',
@@ -228,6 +230,8 @@ export default function Reports() {
                 <TableRow>
                   <TableHead>Data</TableHead>
                   <TableHead>Auditor</TableHead>
+                  <TableHead>RE Auditado</TableHead>
+                  <TableHead>Nome Auditado</TableHead>
                   <TableHead>Máquina</TableHead>
                   <TableHead>Checklist</TableHead>
                   <TableHead>Status</TableHead>
@@ -245,6 +249,8 @@ export default function Reports() {
                     <TableRow key={audit.id}>
                       <TableCell>{new Date((audit as any).created_at).toLocaleDateString('pt-BR')}</TableCell>
                       <TableCell className="font-medium">{emp?.name || 'N/A'}</TableCell>
+                      <TableCell>{aAny.auditado_re || '—'}</TableCell>
+                      <TableCell>{aAny.auditado_nome || '—'}</TableCell>
                       <TableCell>{mach?.name || 'N/A'}</TableCell>
                       <TableCell>{ck?.name || 'N/A'}</TableCell>
                       <TableCell>
@@ -308,6 +314,14 @@ export default function Reports() {
                     <div className="col-span-2">
                       <p className="font-medium text-muted-foreground">Checklist</p>
                       <p className="font-semibold">{ck?.name || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">RE Auditado</p>
+                      <p className="font-semibold">{aAny.auditado_re || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-muted-foreground">Nome Auditado</p>
+                      <p className="font-semibold">{aAny.auditado_nome || '—'}</p>
                     </div>
                   </div>
 
@@ -392,6 +406,8 @@ export default function Reports() {
                 <p><strong>Auditor:</strong> {emp?.name}</p>
                 <p><strong>Máquina:</strong> {mach?.name} ({mach?.code})</p>
                 <p><strong>Checklist:</strong> {ck?.name}</p>
+                <p><strong>RE Auditado:</strong> {audit.auditado_re || '—'}</p>
+                <p><strong>Nome Auditado:</strong> {audit.auditado_nome || '—'}</p>
                 <p><strong>Observações:</strong> {audit.observations || 'Nenhuma'}</p>
                 <div className="mt-2">
                   <strong>Respostas:</strong>
