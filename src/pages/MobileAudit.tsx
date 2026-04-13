@@ -139,13 +139,7 @@ export default function MobileAudit() {
     if (!machine || !checklist || !authUser) return;
     
     const anyNok = answers.some(a => a.conformity === 'nok');
-    const allOk = answers.every(a => a.conformity === 'ok');
-    
-    const finalStatus: 'conforme' | 'nao_conforme' | 'parcial' = anyNok
-      ? 'nao_conforme'
-      : allOk
-        ? 'conforme'
-        : 'parcial';
+    const finalStatus: 'conforme' | 'nao_conforme' = anyNok ? 'nao_conforme' : 'conforme';
 
     addAuditMutation.mutate({
       schedule_entry_id: scheduleEntryId,
@@ -281,7 +275,7 @@ export default function MobileAudit() {
 
           {/* Title bar */}
           <div className="pr-10 text-center py-2 font-bold text-sm text-white" style={{ background: sideColor }}>
-            LPA N1 – {checklist.name.toUpperCase()}
+            {checklist.name.toUpperCase()}
           </div>
 
           {/* Header fields */}

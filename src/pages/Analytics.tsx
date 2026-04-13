@@ -74,13 +74,17 @@ export default function Analytics() {
 
   const statusData = useMemo(() => [
     { name: 'Conforme', value: audits.filter(a => (a as any).status === 'conforme').length },
-    { name: 'Não Conforme', value: audits.filter(a => (a as any).status === 'nao_conforme').length },
-    { name: 'Parcial', value: audits.filter(a => (a as any).status === 'parcial').length },
+    { name: 'Não Conforme', value: audits.filter(a => (a as any).status === 'nao_conforme' || (a as any).status === 'parcial').length },
   ], [audits]);
 
   const machineData = useMemo(() => machines.map(m => {
     const ma = audits.filter(a => (a as any).machine_id === m.id);
-    return { name: m.name.length > 18 ? m.name.substring(0, 18) + '…' : m.name, total: ma.length, conforme: ma.filter(a => (a as any).status === 'conforme').length, naoConforme: ma.filter(a => (a as any).status === 'nao_conforme').length, parcial: ma.filter(a => (a as any).status === 'parcial').length };
+    return {
+      name: m.name.length > 18 ? m.name.substring(0, 18) + '…' : m.name,
+      total: ma.length,
+      conforme: ma.filter(a => (a as any).status === 'conforme').length,
+      naoConforme: ma.filter(a => (a as any).status === 'nao_conforme' || (a as any).status === 'parcial').length,
+    };
   }), [audits, machines]);
 
   const employeeData = useMemo(() => employees.map(e => {
@@ -91,20 +95,19 @@ export default function Analytics() {
   const auditorPerformance = useMemo(() => employees.map(e => {
     const ea = audits.filter(a => (a as any).employee_id === e.id);
     const conforme = ea.filter(a => (a as any).status === 'conforme').length;
-    const naoConforme = ea.filter(a => (a as any).status === 'nao_conforme').length;
-    const parcial = ea.filter(a => (a as any).status === 'parcial').length;
+    const naoConforme = ea.filter(a => (a as any).status === 'nao_conforme' || (a as any).status === 'parcial').length;
     const totalNok = ea.reduce((sum, a) => sum + ((a as any).audit_answers || []).filter((ans: any) => ans.conformity === 'nok').length, 0);
-    return { name: e.name.split(' ').slice(0, 2).join(' '), conforme, naoConforme, parcial, total: ea.length, taxa: ea.length > 0 ? Math.round((conforme / ea.length) * 100) : 0, noks: totalNok };
+    return { name: e.name.split(' ').slice(0, 2).join(' '), conforme, naoConforme, total: ea.length, taxa: ea.length > 0 ? Math.round((conforme / ea.length) * 100) : 0, noks: totalNok };
   }).filter(e => e.total > 0).sort((a, b) => b.taxa - a.taxa), [audits, employees]);
 
   const monthlyData = useMemo(() => {
-    const months: Record<string, { mes: string; total: number; conforme: number; naoConforme: number; parcial: number }> = {};
+    const months: Record<string, { mes: string; total: number; conforme: number; naoConforme: number }> = {};
     audits.forEach(a => {
       const aAny = a as any;
       const d = new Date(aAny.created_at); const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       const label = `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-      if (!months[key]) months[key] = { mes: label, total: 0, conforme: 0, naoConforme: 0, parcial: 0 };
-      months[key].total++; if (aAny.status === 'conforme') months[key].conforme++; if (aAny.status === 'nao_conforme') months[key].naoConforme++; if (aAny.status === 'parcial') months[key].parcial++;
+      if (!months[key]) months[key] = { mes: label, total: 0, conforme: 0, naoConforme: 0 };
+      months[key].total++; if (aAny.status === 'conforme') months[key].conforme++; if (aAny.status === 'nao_conforme' || aAny.status === 'parcial') months[key].naoConforme++;
     });
     return Object.entries(months).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
   }, [audits]);
@@ -256,7 +259,6 @@ export default function Analytics() {
                 <YAxis /><Tooltip /><Legend />
                 <Bar dataKey="conforme" name="Conforme" stackId="a" fill={COLORS[0]} />
                 <Bar dataKey="naoConforme" name="Não Conforme" stackId="a" fill={COLORS[1]} />
-                <Bar dataKey="parcial" name="Parcial" stackId="a" fill={COLORS[2]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -286,7 +288,6 @@ export default function Analytics() {
                 <Tooltip /><Legend />
                 <Bar dataKey="conforme" name="Conforme" stackId="a" fill={COLORS[0]} />
                 <Bar dataKey="naoConforme" name="Não Conforme" stackId="a" fill={COLORS[1]} />
-                <Bar dataKey="parcial" name="Parcial" stackId="a" fill={COLORS[2]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -315,7 +316,6 @@ export default function Analytics() {
                 <XAxis dataKey="mes" fontSize={11} /><YAxis /><Tooltip /><Legend />
                 <Area type="monotone" dataKey="conforme" name="Conformes" stackId="1" stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.4} />
                 <Area type="monotone" dataKey="naoConforme" name="Não Conformes" stackId="1" stroke={COLORS[1]} fill={COLORS[1]} fillOpacity={0.4} />
-                <Area type="monotone" dataKey="parcial" name="Parciais" stackId="1" stroke={COLORS[2]} fill={COLORS[2]} fillOpacity={0.4} />
               </AreaChart>
             </ResponsiveContainer>
           </ChartCard>

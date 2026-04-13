@@ -106,9 +106,7 @@ export default function MyAudits() {
 
   const statusBadge = (status: string) => {
     if (status === 'conforme') return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">Conforme</Badge>;
-    if (status === 'nao_conforme') return <Badge className="bg-destructive/10 text-destructive border-destructive/30">Não Conforme</Badge>;
-    if (status === 'parcial') return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30">Parcial</Badge>;
-    return <Badge variant="secondary">{status}</Badge>;
+    return <Badge className="bg-destructive-10 text-destructive border-destructive-500/30">Não Conforme</Badge>;
   };
 
   const renderEntryRow = (entry: any, showActions: boolean) => {

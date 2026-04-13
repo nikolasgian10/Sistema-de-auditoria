@@ -69,7 +69,7 @@ export interface AuditRecord {
   answers: AuditAnswer[];
   observations: string;
   photos: string[];
-  status: 'conforme' | 'nao_conforme' | 'parcial';
+  status: 'conforme' | 'nao_conforme';
   createdAt: string;
 }
 

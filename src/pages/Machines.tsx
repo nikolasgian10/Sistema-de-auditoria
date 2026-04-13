@@ -57,6 +57,7 @@ export default function Machines() {
   const [historyMachine, setHistoryMachine] = useState<Machine | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [isPrintingLabels, setIsPrintingLabels] = useState(false);
   const [form, setForm] = useState({ name: '', code: '', sector: '', minifabrica: '', description: '' });
   const [searchTerm, setSearchTerm] = useState('');
   const qrRef = useRef<HTMLDivElement>(null);
@@ -143,6 +144,12 @@ export default function Machines() {
   };
 
   const printLabels = useCallback(async (machs: Machine[]) => {
+    if (machs.length === 0) {
+      toast.error('Nenhuma máquina disponível para gerar etiquetas');
+      return;
+    }
+
+    setIsPrintingLabels(true);
     const stage = document.createElement('div');
     stage.style.position = 'fixed';
     stage.style.left = '-9999px';
@@ -195,6 +202,7 @@ export default function Machines() {
       toast.error('Erro ao gerar PDF');
     } finally {
       document.body.removeChild(stage);
+      setIsPrintingLabels(false);
     }
   }, []);
 
@@ -220,8 +228,8 @@ export default function Machines() {
           </Dialog>
           <Button variant="outline" size="sm" onClick={() => exportToCSV(machines)}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</Button>
           <Button variant="outline" size="sm" onClick={() => exportToPDF(machines)}><Download className="mr-2 h-4 w-4" />PDF</Button>
-          <Button variant="outline" size="sm" onClick={() => printLabels(filteredMachines)}>
-            <Tag className="mr-2 h-4 w-4" />Gerar Etiquetas
+          <Button variant="outline" size="sm" onClick={() => printLabels(filteredMachines)} disabled={isPrintingLabels}>
+            <Tag className="mr-2 h-4 w-4" />{isPrintingLabels ? 'Gerando...' : 'Gerar Etiquetas'}
           </Button>
           <Dialog open={formOpen} onOpenChange={(open) => { setFormOpen(open); if (!open) { setEditing(null); resetForm(); } }}>
             <DialogTrigger asChild>
@@ -314,8 +322,8 @@ export default function Machines() {
                 const aAny = audit as any;
                 const emp = allUsers.find(e => e.id === aAny.employee_id);
                 const ck = checklists.find(c => c.id === aAny.checklist_id);
-                const statusColor = audit.status === 'conforme' ? 'bg-green-500/20 text-green-700' : audit.status === 'nao_conforme' ? 'bg-red-500/20 text-red-700' : 'bg-yellow-500/20 text-yellow-700';
-                const statusLabel = audit.status === 'conforme' ? 'Conforme' : audit.status === 'nao_conforme' ? 'Não Conforme' : 'Parcial';
+                const statusColor = audit.status === 'conforme' ? 'bg-green-500/20 text-green-700' : 'bg-red-500/20 text-red-700';
+                const statusLabel = audit.status === 'conforme' ? 'Conforme' : 'Não Conforme';
                 return (
                   <div key={audit.id} className="flex items-center justify-between rounded-lg border p-3">
                     <div>

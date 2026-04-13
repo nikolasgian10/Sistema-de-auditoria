@@ -19,7 +19,7 @@ export interface Audit {
   observations: string;
   auditado_re: string;
   auditado_nome: string;
-  status: 'pendente' | 'conforme' | 'nao_conforme' | 'parcial';
+  status: 'pendente' | 'conforme' | 'nao_conforme';
   conformity_percentage: number;
   created_at: string;
   created_by: string;
@@ -106,24 +106,16 @@ export function useAddAudit() {
       auditado_nome: string;
       answers: AuditItem[];
       photos: string[]; // base64 encoded
-      status: 'conforme' | 'nao_conforme' | 'parcial';
+      status: 'conforme' | 'nao_conforme';
     }) => {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('User not authenticated');
 
       // Recalculate status based on answers to ensure consistency
       const anyNok = input.answers.some(a => a.conformity === 'nok');
-      const anyNA = input.answers.some(a => a.conformity === 'na');
       const allOk = input.answers.every(a => a.conformity === 'ok');
       
-      let calculatedStatus: 'conforme' | 'nao_conforme' | 'parcial';
-      if (anyNok) {
-        calculatedStatus = 'nao_conforme';
-      } else if (allOk) {
-        calculatedStatus = 'conforme';
-      } else {
-        calculatedStatus = 'parcial';
-      }
+      const calculatedStatus: 'conforme' | 'nao_conforme' = anyNok ? 'nao_conforme' : 'conforme';
 
       // Create audit
       const { data: audit, error: auditError } = await (supabase as any)
@@ -232,16 +224,9 @@ export function useUpdateAudit() {
       let finalStatus = input.status;
       if (input.answers && input.answers.length > 0) {
         const anyNok = input.answers.some(a => a.conformity === 'nok');
-        const anyNA = input.answers.some(a => a.conformity === 'na');
         const allOk = input.answers.every(a => a.conformity === 'ok');
         
-        if (anyNok) {
-          finalStatus = 'nao_conforme';
-        } else if (allOk) {
-          finalStatus = 'conforme';
-        } else {
-          finalStatus = 'parcial';
-        }
+        finalStatus = anyNok ? 'nao_conforme' : 'conforme';
       }
 
       const { data, error } = await (supabase as any)

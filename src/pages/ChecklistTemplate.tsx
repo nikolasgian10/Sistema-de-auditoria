@@ -36,7 +36,7 @@ export default function ChecklistTemplate() {
   const addChecklist = useAddChecklist();
   const updateChecklist = useUpdateChecklist();
 
-  const [title, setTitle] = useState('LPA N1 – CHECK LIST MAN & M.C.');
+  const [title, setTitle] = useState('CHECK LIST MAN & M.C.');
   const [sideLabel, setSideLabel] = useState('MAN. & M.C');
   const [level, setLevel] = useState<'1' | '2' | 'other'>('1');
   const [sideColor, setSideColor] = useState('#16a34a');
@@ -53,9 +53,9 @@ export default function ChecklistTemplate() {
       const ck = checklists.find(c => c.id === editingId);
       if (ck) {
         setSelectedChecklist(editingId);
-        setTitle(`LPA N1 – ${ck.name.toUpperCase()}`);
-        setSideLabel(ck.category.toUpperCase());
         setLevel((ck.level || '1') as '1' | '2' | 'other');
+        setTitle(ck.name.toUpperCase());
+        setSideLabel(ck.category.toUpperCase());
         setItems(ck.items.map(item => ({
           id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
           type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
@@ -83,9 +83,9 @@ export default function ChecklistTemplate() {
     const ck = checklists.find(c => c.id === ckId);
     if (!ck) return;
     setSelectedChecklist(ckId);
-    setTitle(`LPA N1 – ${ck.name.toUpperCase()}`);
-    setSideLabel(ck.category.toUpperCase());
     setLevel((ck.level || '1') as '1' | '2' | 'other');
+    setTitle(ck.name.toUpperCase());
+    setSideLabel(ck.category.toUpperCase());
     setItems(ck.items.map(item => ({
       id: item.id, area: ck.category.toUpperCase(), question: item.question, explanation: item.explanation || '',
       type: (item.type || 'ok_nok') as 'ok_nok' | 'text' | 'number' | 'pessoas' | 'rastreabilidade',
@@ -104,8 +104,8 @@ export default function ChecklistTemplate() {
   const handleSaveChecklist = async () => {
     if (!title || items.length === 0) { toast.error('Título e pelo menos um item são obrigatórios'); return; }
     
-    // Remover "LPA N1 – " do título se estiver lá
-    const cleanTitle = title.replace(/^LPA N1 – /, '').trim();
+    // Remover prefixo LPA N# – do título se estiver lá
+    const cleanTitle = title.replace(/^LPA N\d+ – /, '').trim();
     
     const checklistData = {
       name: cleanTitle,

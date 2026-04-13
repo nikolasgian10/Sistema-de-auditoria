@@ -44,10 +44,9 @@ export default function Dashboard() {
     const pending = schedule.filter(s => (s as any).status === 'pending').length;
     const completed = audits.filter(a => (a as any).status !== 'pendente').length;
     const conformeCount = audits.filter(a => (a as any).status === 'conforme').length;
-    const naoConformeCount = audits.filter(a => (a as any).status === 'nao_conforme').length;
-    const parcialCount = audits.filter(a => (a as any).status === 'parcial').length;
+    const naoConformeCount = audits.filter(a => (a as any).status === 'nao_conforme' || (a as any).status === 'parcial').length;
     const conformityRate = audits.length > 0 ? Math.round((conformeCount / audits.length) * 100) : 0;
-    return { pending, completed, conformeCount, naoConformeCount, parcialCount, conformityRate };
+    return { pending, completed, conformeCount, naoConformeCount, conformityRate };
   }, [schedule, audits]);
 
   const worstMachine = useMemo(() => {
@@ -113,7 +112,6 @@ export default function Dashboard() {
   const statusPieData = useMemo(() => [
     { name: 'Conforme', value: stats.conformeCount },
     { name: 'Não Conforme', value: stats.naoConformeCount },
-    { name: 'Parcial', value: stats.parcialCount },
   ], [stats]);
 
   const machineNokData = useMemo(() => {
@@ -375,9 +373,9 @@ export default function Dashboard() {
                   const statusColors: Record<string, string> = {
                     conforme: 'bg-emerald-500/10 text-emerald-600',
                     nao_conforme: 'bg-destructive/10 text-destructive',
-                    parcial: 'bg-yellow-500/10 text-yellow-600',
+                    parcial: 'bg-destructive/10 text-destructive',
                   };
-                  const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
+                  const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Não Conforme' };
                   const auditStatus = (audit as any).status;
                   return (
                     <div key={(audit as any).id} className="flex items-center justify-between rounded-md border p-3">

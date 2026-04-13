@@ -74,7 +74,7 @@ export default function Reports() {
   const handlePrint = () => window.print();
 
   const handleExport = () => {
-    const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
+    const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme' };
     const header = ['Data', 'Auditor', 'RE Auditado', 'Nome Auditado', 'Máquina', 'Código Máq.', 'Setor', 'Checklist', 'Status', 'Observações', 'Respostas'];
     const rows = filtered.map(audit => {
       const aAny = audit as any;
@@ -94,7 +94,7 @@ export default function Reports() {
         mach?.code || '',
         mach?.sector || '',
         ck?.name || '',
-        statusLabels[aAny.status] || aAny.status,
+        statusLabels[aAny.status] || 'Não Conforme',
         aAny.observations || '',
         answers,
       ];
@@ -115,9 +115,8 @@ export default function Reports() {
   const statusColors: Record<string, string> = {
     conforme: 'bg-success/10 text-success',
     nao_conforme: 'bg-destructive/10 text-destructive',
-    parcial: 'bg-warning/10 text-warning',
   };
-  const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Parcial' };
+  const statusLabels: Record<string, string> = { conforme: 'Conforme', nao_conforme: 'Não Conforme', parcial: 'Não Conforme' };
 
   return (
     <div className="space-y-6">
@@ -203,7 +202,6 @@ export default function Reports() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="conforme">Conforme</SelectItem>
                   <SelectItem value="nao_conforme">Não Conforme</SelectItem>
-                  <SelectItem value="parcial">Parcial</SelectItem>
                 </SelectContent>
               </Select>
             </div>

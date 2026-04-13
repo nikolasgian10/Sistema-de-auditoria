@@ -111,7 +111,6 @@ function getStatusColor(entry: any, audits: any[]): string {
   const audit = audits.find(a => a.schedule_entry_id === entry.id);
   if (!audit) return 'bg-green-500/20 border-green-500/40 text-green-700 dark:text-green-400';
   if (audit.status === 'conforme') return 'bg-green-500/20 border-green-500/40 text-green-700 dark:text-green-400';
-  if (audit.status === 'nao_conforme') return 'bg-yellow-500/20 border-yellow-500/40 text-yellow-700 dark:text-yellow-400';
   return 'bg-yellow-500/20 border-yellow-500/40 text-yellow-700 dark:text-yellow-400';
 }
 
@@ -121,8 +120,7 @@ function getStatusLabel(entry: any, audits: any[]): string {
   const audit = audits.find(a => a.schedule_entry_id === entry.id);
   if (!audit) return 'Realizada';
   if (audit.status === 'conforme') return 'Conforme';
-  if (audit.status === 'nao_conforme') return 'Não conforme';
-  return 'Parcial';
+  return 'Não conforme';
 }
 
 function getChecklistShortName(fullName: string): string {
@@ -1009,21 +1007,22 @@ export default function Schedule() {
           const ck = checklists.find(c => c.id === entry.checklistId);
           const statusText = getStatusLabel(entry, audits);
           const cellBg = getStatusColor(entry, audits);
+          const isPendingStatus = entry.status === 'pending';
 
           return (
             <div key={entry.id} className={`group relative px-2 py-1.5 rounded border text-xs ${cellBg}`}>
               {/* Employee Name - Bold and Prominent */}
-              <div className="font-bold text-[11px] leading-tight mb-0.5">{emp?.name || 'N/A'}</div>
+              <div className="cell-name font-bold text-[11px] leading-tight mb-0.5">{emp?.name || 'N/A'}</div>
               
               {/* Checklist Category */}
               {ck && (
-                <div className="text-[8px] text-muted-foreground/70 mb-0.5">
+                <div className="cell-checklist text-[8px] text-muted-foreground/70 mb-0.5">
                   {ck.category || ''}
                 </div>
               )}
               
               {/* Status */}
-              <div className="text-[8px] font-medium text-muted-foreground/80">{statusText}</div>
+              <div className={`cell-status text-[8px] font-medium text-muted-foreground/80 ${isPendingStatus ? 'pending-status' : ''}`}>{statusText}</div>
               
               {!isHistory && !isAdmin && (
                 <div className="absolute top-0.5 right-0.5 hidden group-hover:flex gap-0.5">
@@ -1164,15 +1163,51 @@ export default function Schedule() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <style>{`@media print {
+        html, body { width: 100% !important; height: auto !important; margin: 0 !important; padding: 0 !important; }
+        body * { visibility: hidden !important; }
+        .schedule-print-area, .schedule-print-area * { visibility: visible !important; }
+        .schedule-print-area { display: block !important; position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        aside, header, nav, .sidebar, .layout, .AppLayout, .fixed.inset-0, .fixed.inset-y-0, .bg-sidebar, .bg-black\/50 { display: none !important; visibility: hidden !important; }
+        .schedule-print-area .no-print, .schedule-print-area .tabs-list, .schedule-print-area .no-print * { display: none !important; }
+        .schedule-print-area button, .schedule-print-area a, .schedule-print-area input, .schedule-print-area select, .schedule-print-area textarea, .schedule-print-area summary, .schedule-print-area [role="button"] { display: none !important; }
+        .schedule-print-area table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; margin: 0 !important; font-size: 5px !important; }
+        .schedule-print-area thead { display: table-header-group !important; }
+        .schedule-print-area tbody { display: table-row-group !important; }
+        .schedule-print-area tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+        .schedule-print-area th, .schedule-print-area td { min-width: 0 !important; width: 1px !important; max-width: 2.3cm !important; padding: 0.05rem !important; font-size: 5px !important; line-height: 1 !important; white-space: normal !important; word-break: break-word !important; }
+        .schedule-print-area th { background-color: #0f4bb9 !important; color: #fff !important; border-width: 0.2px !important; }
+        .schedule-print-area td { border: 0.2px solid #999 !important; }
+        .schedule-print-area .cell-name { font-size: 7px !important; margin-bottom: 0.05rem !important; padding-bottom: 0.05rem !important; border-bottom: 0.2px solid #999 !important; }
+        .schedule-print-area .cell-checklist { font-size: 6px !important; margin-bottom: 0.05rem !important; }
+        .schedule-print-area .pending-status { display: none !important; }
+        .schedule-print-area .bg-red-500\/20, .schedule-print-area .bg-red-100, .schedule-print-area .border-red-500\/40, .schedule-print-area .border-red-400,
+        .schedule-print-area .bg-yellow-500\/20, .schedule-print-area .bg-yellow-100, .schedule-print-area .border-yellow-500\/40, .schedule-print-area .border-yellow-400,
+        .schedule-print-area .bg-green-500\/20, .schedule-print-area .bg-green-100, .schedule-print-area .border-green-500\/40, .schedule-print-area .border-green-400,
+        .schedule-print-area .bg-muted\/20 { background-color: transparent !important; color: #000 !important; border-color: #999 !important; }
+        .schedule-print-area .bg-blue-700, .schedule-print-area .bg-blue-800, .schedule-print-area .bg-blue-700\/10 { background-color: #0f4bb9 !important; color: #fff !important; }
+        .schedule-print-area .border { border-width: 0.3px !important; border-color: #999 !important; }
+        .schedule-print-area .text-2xl, .schedule-print-area .text-lg, .schedule-print-area .text-sm, .schedule-print-area .text-base,
+        .schedule-print-area .text-xs, .schedule-print-area .text-[10px], .schedule-print-area .text-[11px] { font-size: 5px !important; }
+        .schedule-print-area .p-2, .schedule-print-area .px-2, .schedule-print-area .py-2, .schedule-print-area .p-3, .schedule-print-area .px-3, .schedule-print-area .py-3,
+        .schedule-print-area .px-4, .schedule-print-area .py-4, .schedule-print-area .p-4 { padding: 0.05rem !important; }
+        .schedule-print-area .space-y-6 > * + *, .schedule-print-area .space-y-4 > * + *, .schedule-print-area .space-y-3 > * + * { margin-top: 0 !important; }
+        .schedule-print-area .rounded, .schedule-print-area .rounded-md, .schedule-print-area .rounded-lg { border-radius: 0 !important; }
+        .schedule-print-area th, .schedule-print-area td { min-width: 0 !important; }
+        .schedule-print-area div, .schedule-print-area span, .schedule-print-area p, .schedule-print-area label { font-size: 6px !important; }
+        .schedule-print-area { transform: scale(0.95) !important; transform-origin: top left !important; }
+        @page { size: A4 landscape; margin: 5mm; }
+      }`}</style>
+      <div className="flex flex-wrap items-center justify-between gap-4 no-print">
         <div>
           <h1 className="text-2xl font-bold">Cronograma de Auditorias</h1>
           <p className="text-sm text-muted-foreground">Planejamento, histórico e análise</p>
         </div>
       </div>
 
-      <Tabs defaultValue="current" className="space-y-4">
-        <TabsList>
+      <div className="schedule-print-area">
+        <Tabs defaultValue="current" className="space-y-4">
+        <TabsList className="no-print">
           <TabsTrigger value="current">Cronograma Atual</TabsTrigger>
           <TabsTrigger value="history"><History className="mr-1.5 h-4 w-4" />Histórico</TabsTrigger>
           <TabsTrigger value="missed"><AlertTriangle className="mr-1.5 h-4 w-4" />Não Realizadas</TabsTrigger>
@@ -1472,6 +1507,7 @@ export default function Schedule() {
           </Card>
         </TabsContent>
       </Tabs>
+      </div>
 
       {/* Edit Entry Dialog */}
       <Dialog open={!!editEntry} onOpenChange={() => setEditEntry(null)}>
